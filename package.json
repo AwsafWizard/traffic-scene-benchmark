@@ -1,5 +1,5 @@
 {
-  "name": "traffic-llm-bench",
+  "name": "traffic-scene-benchmark",
   "version": "0.1.0",
   "private": true,
   "scripts": {
