@@ -132,6 +132,39 @@ Two things to know: it's eventual, not instant — updates land when the sync cl
 to it — and your reference answers and private setter notes are never written to the shared
 folder, only questions, answers, and grounder comments.
 
+### Setting up the shared folder
+
+You paste a **local folder path** into the app, never a Drive link. Something else has to mirror
+that folder to the cloud.
+
+**Windows / macOS** — install [Google Drive for Desktop](https://www.google.com/drive/download/),
+make a folder in your Drive (say `traffic-bench`), and paste the local path it appears at:
+
+```
+Windows   G:\My Drive\traffic-bench
+macOS     ~/Library/CloudStorage/GoogleDrive-you@gmail.com/My Drive/traffic-bench
+```
+
+**Linux** — Google publishes no Drive client. Connecting Drive through GNOME Online Accounts
+does *not* work either: that mount lists files by opaque ID rather than name, so the app can't
+find the bundles. Use [rclone](https://rclone.org) instead, which `scripts/drive-sync.sh`
+wraps:
+
+```bash
+curl https://rclone.org/install.sh | sudo bash   # once
+./scripts/drive-sync.sh setup                    # authorise your Google account
+./scripts/drive-sync.sh start                    # sync every 20s in the background
+```
+
+`setup` prints the local path to paste into the app — by default `~/gdrive/traffic-bench`.
+Override any of `BENCH_REMOTE`, `BENCH_REMOTE_DIR`, `BENCH_LOCAL_DIR`, or
+`BENCH_SYNC_INTERVAL` if you want different names or timing. `status` shows what's running and
+`stop` ends it.
+
+Both people must point at the *same* Drive folder — share it from Drive with your partner's
+Google account, and they'll see it under **Shared with me** (right-click → *Add shortcut to
+Drive* so it appears in their own tree).
+
 **Same network** — the Share page gives them a link that puts their browser into
 grounding mode. Nothing to install; your machine has to stay awake.
 
