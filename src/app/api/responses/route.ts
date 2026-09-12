@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { autoGrade } from "@/lib/scoring";
 import type { Question } from "@/lib/types";
+import { syncInBackground } from "@/lib/sync";
 
 export async function POST(request: Request) {
   const body = (await request.json()) as {
@@ -52,6 +53,8 @@ export async function POST(request: Request) {
        ORDER BY q.id LIMIT 1`,
     )
     .get() as { id: number } | undefined;
+
+  syncInBackground();
 
   return NextResponse.json(
     { id: info.lastInsertRowid, next_question_id: next?.id ?? null },

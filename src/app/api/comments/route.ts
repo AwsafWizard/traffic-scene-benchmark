@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { getDb } from "@/lib/db";
 import { getRole } from "@/lib/session";
+import { syncInBackground } from "@/lib/sync";
 
 export async function POST(request: Request) {
   const body = (await request.json()) as {
@@ -33,6 +34,7 @@ export async function POST(request: Request) {
       text,
     );
 
+  syncInBackground();
   return NextResponse.json({ id: info.lastInsertRowid }, { status: 201 });
 }
 

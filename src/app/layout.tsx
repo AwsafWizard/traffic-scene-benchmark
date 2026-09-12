@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import { getRole } from "@/lib/session";
+import { getSyncConfig } from "@/lib/sync";
+import { SyncPoller } from "./transfer/SyncControls";
 import "./globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -29,6 +31,7 @@ const GROUNDER_NAV = [
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   const role = await getRole();
+  const sync = getSyncConfig();
   const nav = role === "grounder" ? GROUNDER_NAV : BENCHMARKER_NAV;
 
   return (
@@ -59,6 +62,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           </nav>
         </header>
         <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">{children}</main>
+        {sync.enabled && <SyncPoller />}
       </body>
     </html>
   );

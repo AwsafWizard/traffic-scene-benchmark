@@ -30,6 +30,9 @@ function init(): Database.Database {
       options TEXT,
       reference_answer TEXT,
       notes TEXT,
+      -- 1 when this row arrived from another install, so folder sync doesn't
+      -- bounce the same question back and forth between copies.
+      imported INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -41,6 +44,7 @@ function init(): Database.Database {
       confidence INTEGER,
       rationale TEXT,
       duration_ms INTEGER,
+      imported INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -95,6 +99,7 @@ function init(): Database.Database {
       author_role TEXT NOT NULL,
       author_name TEXT,
       body TEXT NOT NULL,
+      imported INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -126,6 +131,15 @@ function init(): Database.Database {
     db.exec("ALTER TABLE questions ADD COLUMN uid TEXT");
     db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_questions_uid ON questions(uid)");
   }
+  // Rows that arrived from another install are not re-published by folder sync,
+  // so a shared folder doesn't accumulate every copy of everyone's data.
+  for (const table of ["questions", "human_responses", "comments"]) {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (cols.length && !cols.some((c) => c.name === "imported")) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN imported INTEGER NOT NULL DEFAULT 0`);
+    }
+  }
+
   const backfill = db.prepare("UPDATE questions SET uid = ? WHERE id = ?");
   for (const row of db.prepare("SELECT id FROM questions WHERE uid IS NULL").all() as {
     id: number;

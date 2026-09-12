@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import { getDb, uploadPath } from "@/lib/db";
 import { isGrounder } from "@/lib/session";
+import { syncInBackground } from "@/lib/sync";
 
 const ALLOWED = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
@@ -65,5 +66,6 @@ export async function POST(request: Request) {
       notes || null,
     );
 
+  syncInBackground();
   return NextResponse.json({ id: info.lastInsertRowid }, { status: 201 });
 }

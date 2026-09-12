@@ -75,14 +75,19 @@ const EXT: Record<string, string> = {
   "image/gif": ".gif",
 };
 
-export function exportQuestions(ids?: number[]): QuestionBundle {
+export function exportQuestions(
+  ids?: number[],
+  { localOnly = false }: { localOnly?: boolean } = {},
+): QuestionBundle {
   const db = getDb();
   const rows = (
     ids?.length
       ? db
           .prepare(`SELECT * FROM questions WHERE id IN (${ids.map(() => "?").join(",")})`)
           .all(...ids)
-      : db.prepare("SELECT * FROM questions ORDER BY id").all()
+      : localOnly
+        ? db.prepare("SELECT * FROM questions WHERE imported = 0 ORDER BY id").all()
+        : db.prepare("SELECT * FROM questions ORDER BY id").all()
   ) as Question[];
 
   const questions: BundleQuestion[] = rows.map((q) => {
@@ -109,22 +114,35 @@ export function exportQuestions(ids?: number[]): QuestionBundle {
   };
 }
 
-export function exportResponses(): ResponseBundle {
+export function exportResponses({
+  includeSetterComments = true,
+  localOnly = false,
+}: { includeSetterComments?: boolean; localOnly?: boolean } = {}): ResponseBundle {
   const rows = getDb()
     .prepare(
       `SELECT q.uid AS question_uid, h.grounder_name, h.answer, h.confidence,
               h.rationale, h.duration_ms, h.created_at
        FROM human_responses h
        JOIN questions q ON q.id = h.question_id
+       ${localOnly ? "WHERE h.imported = 0" : ""}
        ORDER BY h.id`,
     )
     .all() as BundleResponse[];
 
+  // Folder sync shares a directory with the grounder, so the setter's private
+  // working notes stay out of it — seeing them could give away the answer.
   const comments = getDb()
     .prepare(
       `SELECT c.uid, q.uid AS question_uid, c.author_role, c.author_name, c.body, c.created_at
        FROM comments c
        JOIN questions q ON q.id = c.question_id
+       ${[
+         includeSetterComments ? null : "c.author_role = 'grounder'",
+         localOnly ? "c.imported = 0" : null,
+       ]
+         .filter(Boolean)
+         .map((clause, i) => (i === 0 ? `WHERE ${clause}` : `AND ${clause}`))
+         .join(" ")}
        ORDER BY c.id`,
     )
     .all() as BundleComment[];
@@ -178,8 +196,8 @@ export function importQuestions(bundle: QuestionBundle): ImportResult {
 
   const existing = db.prepare("SELECT 1 FROM questions WHERE uid = ?");
   const insert = db.prepare(
-    `INSERT INTO questions (uid, image_path, prompt, category, answer_type, options)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO questions (uid, image_path, prompt, category, answer_type, options, imported)
+     VALUES (?, ?, ?, ?, ?, ?, 1)`,
   );
 
   let added = 0;
@@ -232,8 +250,8 @@ export function importResponses(bundle: ResponseBundle): ImportResult {
   );
   const insert = db.prepare(
     `INSERT INTO human_responses
-       (question_id, grounder_name, answer, confidence, rationale, duration_ms, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (question_id, grounder_name, answer, confidence, rationale, duration_ms, created_at, imported)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
   );
 
   let added = 0;
@@ -279,8 +297,8 @@ export function importResponses(bundle: ResponseBundle): ImportResult {
   });
 
   const insertComment = db.prepare(
-    `INSERT INTO comments (uid, question_id, author_role, author_name, body, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO comments (uid, question_id, author_role, author_name, body, created_at, imported)
+     VALUES (?, ?, ?, ?, ?, ?, 1)`,
   );
   const commentExists = db.prepare("SELECT 1 FROM comments WHERE uid = ?");
 

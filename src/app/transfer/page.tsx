@@ -1,12 +1,15 @@
 import { getDb } from "@/lib/db";
 import { getRole } from "@/lib/session";
+import { getSyncConfig } from "@/lib/sync";
 import ImportForm from "./ImportForm";
+import { SyncSettings } from "./SyncControls";
 
 export const dynamic = "force-dynamic";
 
 export default async function TransferPage() {
   const isGrounder = (await getRole()) === "grounder";
   const db = getDb();
+  const sync = getSyncConfig();
 
   const questionCount = (
     db.prepare("SELECT COUNT(*) AS n FROM questions").get() as { n: number }
@@ -28,11 +31,24 @@ export default async function TransferPage() {
 
       <section className="space-y-4 rounded-xl border border-line bg-surface p-5">
         <div>
+          <h2 className="text-sm font-semibold">Automatic folder sync</h2>
+          <p className="mt-1 text-sm text-muted">
+            Point both copies at the same shared folder and they keep each other up to date —
+            no files to pass by hand. The app only reads and writes local files; Drive, Dropbox
+            or Syncthing does the moving, so there is nothing to sign in to.
+          </p>
+        </div>
+        <SyncSettings config={sync} />
+      </section>
+
+      <section className="space-y-4 rounded-xl border border-line bg-surface p-5">
+        <div>
           <h2 className="text-sm font-semibold">Export</h2>
           <p className="mt-1 text-sm text-muted">
             {isGrounder
               ? "Send your answers back to the benchmarker."
               : "Send the question set to your grounder, or take your own answers elsewhere."}
+            {sync.enabled && " Sync already handles this — these are for one-off transfers."}
           </p>
         </div>
 

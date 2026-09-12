@@ -108,7 +108,29 @@ Only enabled models run. Disabling a model keeps its past results in the tables.
 
 ## Working with a partner
 
-There are two ways to get someone else answering questions.
+There are three ways to get someone else answering questions.
+
+**Shared folder sync (easiest for two machines)** — point both copies at the same folder kept
+in step by Google Drive for Desktop, Dropbox, or Syncthing, and they keep each other current.
+Set the folder on the Transfer page and switch sync on. The app only reads and writes local
+files, so there is no Google account to connect and no API key on either machine — the sync
+client does the moving.
+
+Each copy writes two files named after its own install id and never touches anyone else's:
+
+```
+questions-<id>.json    the questions that copy created
+answers-<id>.json      that copy's answers and grounder comments
+```
+
+Rows that arrive from elsewhere are marked as imported and never re-published, so the folder
+doesn't fill up with copies of copies. Files are only rewritten when the content actually
+changed, so two idle installs generate no traffic at all. Pushes happen the moment a question,
+answer, or comment is saved; each copy also pulls every 30 seconds while a tab is open.
+
+Two things to know: it's eventual, not instant — updates land when the sync client gets around
+to it — and your reference answers and private setter notes are never written to the shared
+folder, only questions, answers, and grounder comments.
 
 **Same network** — the Share page gives them a link that puts their browser into
 grounding mode. Nothing to install; your machine has to stay awake.
