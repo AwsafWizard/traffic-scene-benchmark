@@ -170,7 +170,7 @@ file, since they carry no images and are tiny:
 
 ```
 q/<question-id>.json   one question, image embedded
-answers-<id>.json      that copy's answers and its grounder comments
+answers-<id>.json      that copy's human answers, model answers and comments
 ```
 
 Splitting questions matters more than it looks. With everything in one bundle, adding a
@@ -186,8 +186,15 @@ only rewritten when their content actually changes, so two idle installs generat
 Pushes happen the moment a question, answer, or comment is saved; each copy also pulls every 30
 seconds while a tab is open. It's eventual, not instant.
 
-**Your reference answers and private notes are never uploaded** — only questions, answers, and
-grounder comments. Handing someone the bucket can't spoil their grounding.
+Model answers travel too, including ones pasted by hand, their follow-up threads, and the grade
+you gave them — so both of you see the same Results. A model the other side used but you
+haven't configured is registered here as a disabled entry, so its answers are labelled properly
+and it is never called. If a copy's remote file goes missing or is emptied, the next sync
+notices and republishes it.
+
+**Your reference answers and private notes are never uploaded** — only questions, answers,
+model answers, and grounder comments. Handing someone the bucket can't spoil their grounding:
+a question you haven't answered keeps its answers hidden locally regardless of what synced.
 
 ---
 

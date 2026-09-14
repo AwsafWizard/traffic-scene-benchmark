@@ -49,6 +49,10 @@ export interface ModelRow {
 
 export interface LlmRun {
   id: number;
+  /** Stable across installs, so runs can be matched when synced. */
+  uid: string;
+  /** 1 when this run arrived from another install. */
+  imported: number;
   question_id: number;
   model_key: string;
   answer: string | null;

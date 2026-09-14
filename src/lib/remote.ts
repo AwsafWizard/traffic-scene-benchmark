@@ -17,6 +17,7 @@ export interface RemoteFile {
   name: string;
   /** Changes when the file does, so we can skip re-downloading it. */
   version: string;
+  size: number;
 }
 
 export class RemoteError extends Error {}
@@ -40,7 +41,11 @@ export function folderRemote(dir: string): Remote {
         for (const name of fs.readdirSync(full)) {
           const stat = fs.statSync(path.join(full, name));
           if (stat.isDirectory()) continue;
-          entries.push({ name: sub + name, version: `${stat.mtimeMs}:${stat.size}` });
+          entries.push({
+            name: sub + name,
+            version: `${stat.mtimeMs}:${stat.size}`,
+            size: stat.size,
+          });
         }
       };
       scan("");
@@ -124,6 +129,7 @@ export function supabaseRemote({ url, anonKey, bucket }: SupabaseSettings): Remo
             out.push({
               name: prefix + row.name,
               version: `${row.updated_at ?? ""}:${row.metadata?.size ?? ""}`,
+              size: row.metadata?.size ?? 0,
             });
           }
           if (rows.length < 1000) return out;

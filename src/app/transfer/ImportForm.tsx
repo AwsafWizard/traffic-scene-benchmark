@@ -64,6 +64,11 @@ export default function ImportForm() {
             Imported {result.added} {result.kind === "questions" ? "question" : "answer"}
             {result.added === 1 ? "" : "s"}.
           </p>
+          {result.runs != null && result.runs > 0 && (
+            <p className="mt-1 text-xs">
+              Plus {result.runs} model answer{result.runs === 1 ? "" : "s"}.
+            </p>
+          )}
           {result.comments != null && result.comments > 0 && (
             <p className="mt-1 text-xs">
               Plus {result.comments} comment{result.comments === 1 ? "" : "s"}.

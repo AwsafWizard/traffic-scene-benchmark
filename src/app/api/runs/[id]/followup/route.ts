@@ -4,6 +4,7 @@ import path from "node:path";
 import { getDb, uploadPath } from "@/lib/db";
 import { askFollowUp, type Turn } from "@/lib/providers";
 import { isGrounder } from "@/lib/session";
+import { syncInBackground } from "@/lib/sync";
 import type { LlmRun, ModelRow, Question, RunTurn } from "@/lib/types";
 
 export const maxDuration = 300;
@@ -66,6 +67,7 @@ export async function POST(
     }
     insertTurn.run(run.id, "user", message, null, null);
     insertTurn.run(run.id, "assistant", answer, null, null);
+    await syncInBackground();
     return NextResponse.json({ ok: true }, { status: 201 });
   }
 
@@ -92,6 +94,7 @@ export async function POST(
     );
     insertTurn.run(run.id, "user", message, null, null);
     insertTurn.run(run.id, "assistant", reply, Date.now() - started, null);
+    await syncInBackground();
     return NextResponse.json({ ok: true }, { status: 201 });
   } catch (error) {
     insertTurn.run(run.id, "user", message, null, null);

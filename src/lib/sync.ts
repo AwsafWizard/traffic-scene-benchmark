@@ -127,7 +127,7 @@ function remoteFor(config: SyncConfig): Remote {
 }
 
 export interface SyncResult {
-  pulled: { questions: number; answers: number; comments: number };
+  pulled: { questions: number; answers: number; comments: number; runs: number };
   pushed: string[];
   filesSeen: number;
   where: string;
@@ -145,7 +145,7 @@ export async function syncNow(): Promise<SyncResult> {
   if (config.mode === "off") throw new SyncError("Sync is turned off.");
 
   const remote = remoteFor(config);
-  const pulled = { questions: 0, answers: 0, comments: 0 };
+  const pulled = { questions: 0, answers: 0, comments: 0, runs: 0 };
   let filesSeen = 0;
 
   const mine = new Set([
@@ -157,7 +157,21 @@ export async function syncNow(): Promise<SyncResult> {
   // re-downloaded — the questions bundle carries every image.
   const seen = JSON.parse(setting("sync_seen") ?? "{}") as Record<string, string>;
 
-  for (const file of await remote.list()) {
+  // Questions must land before the answers and model runs that reference them,
+  // or a first sync drops them all as unmatched.
+  const files = (await remote.list()).sort((a, b) => {
+    const rank = (name: string) => (name.startsWith("answers-") ? 1 : 0);
+    return rank(a.name) - rank(b.name);
+  });
+
+  // Our own files, so we can notice if one has been emptied or removed behind
+  // our back — otherwise the stored hash would stop us ever republishing it.
+  const ownRemote = new Map<string, number>();
+
+  for (const file of files) {
+    if (mine.has(file.name) || file.name.startsWith(QUESTION_PREFIX)) {
+      ownRemote.set(file.name, file.size);
+    }
     if (!file.name.endsWith(".json") || mine.has(file.name)) continue;
 
     const isQuestion = file.name.startsWith(QUESTION_PREFIX);
@@ -180,12 +194,16 @@ export async function syncNow(): Promise<SyncResult> {
 
     if (bundle.kind === "questions") {
       pulled.questions += importQuestions(bundle).added;
+      seen[file.name] = file.version;
     } else {
       const result = importResponses(bundle);
       pulled.answers += result.added;
       pulled.comments += result.comments ?? 0;
+      pulled.runs += result.runs ?? 0;
+      // Rows referencing a question we haven't received yet must not mark the
+      // file as read, or one bad pass would drop them for good.
+      if (result.unmatched === 0) seen[file.name] = file.version;
     }
-    seen[file.name] = file.version;
   }
   putSetting("sync_seen", JSON.stringify(seen));
 
@@ -197,15 +215,19 @@ export async function syncNow(): Promise<SyncResult> {
   // One file per question, so adding one costs one small upload rather than
   // republishing every image.
   const hashes = JSON.parse(setting("sync_hash_q") ?? "{}") as Record<string, string>;
+
+  /** A bundle carrying nothing is ~130 bytes of envelope and no payload. */
+  const looksEmpty = (name: string) => (ownRemote.get(name) ?? 0) < 200;
   const localQuestions = db
     .prepare("SELECT id, uid FROM questions WHERE imported = 0 ORDER BY id")
     .all() as { id: number; uid: string }[];
 
   for (const question of localQuestions) {
+    const name = `${QUESTION_PREFIX}${question.uid}.json`;
     const body = JSON.stringify(exportQuestions([question.id]), null, 2);
     const hash = fingerprint(body);
-    if (hashes[question.uid] === hash) continue;
-    const name = `${QUESTION_PREFIX}${question.uid}.json`;
+    // Republish if the remote copy has gone missing or been emptied.
+    if (hashes[question.uid] === hash && !looksEmpty(name)) continue;
     await remote.put(name, body);
     hashes[question.uid] = hash;
     pushed.push(name);
@@ -259,7 +281,10 @@ export async function syncNow(): Promise<SyncResult> {
       .prepare("SELECT COUNT(*) AS n FROM comments WHERE author_role = 'grounder' AND imported = 0")
       .get() as { n: number }
   ).n;
-  if (localAnswers > 0 || localComments > 0) {
+  const localRuns = (
+    db.prepare("SELECT COUNT(*) AS n FROM llm_runs WHERE imported = 0").get() as { n: number }
+  ).n;
+  if (localAnswers > 0 || localComments > 0 || localRuns > 0) {
     const name = `answers-${config.installId}.json`;
     const body = JSON.stringify(
       exportResponses({ includeSetterComments: false, localOnly: true }),
@@ -267,7 +292,7 @@ export async function syncNow(): Promise<SyncResult> {
       2,
     );
     const hash = fingerprint(body);
-    if (setting("sync_hash_answers") !== hash) {
+    if (setting("sync_hash_answers") !== hash || looksEmpty(name)) {
       await remote.put(name, body);
       putSetting("sync_hash_answers", hash);
       pushed.push(name);

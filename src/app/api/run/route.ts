@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { getDb, uploadPath } from "@/lib/db";
@@ -6,6 +7,7 @@ import { askModel } from "@/lib/providers";
 import { autoGrade } from "@/lib/scoring";
 import { isGrounder } from "@/lib/session";
 import type { ModelRow, Question } from "@/lib/types";
+import { syncInBackground } from "@/lib/sync";
 
 export const maxDuration = 300;
 
@@ -57,8 +59,8 @@ export async function POST(request: Request) {
   const mediaType = MEDIA[path.extname(question.image_path).toLowerCase()] ?? "image/png";
 
   const insert = getDb().prepare(
-    `INSERT INTO llm_runs (question_id, model_key, answer, reasoning, raw, latency_ms, error)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO llm_runs (uid, question_id, model_key, answer, reasoning, raw, latency_ms, error)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
 
   const results = await Promise.all(
@@ -68,6 +70,7 @@ export async function POST(request: Request) {
         const result = await askModel(model, question, imageB64, mediaType);
         const latency = Date.now() - started;
         const info = insert.run(
+          crypto.randomUUID(),
           question.id,
           model.key,
           result.answer,
@@ -86,6 +89,7 @@ export async function POST(request: Request) {
         return { model: model.key, ok: true };
       } catch (error) {
         insert.run(
+          crypto.randomUUID(),
           question.id,
           model.key,
           null,
@@ -99,5 +103,6 @@ export async function POST(request: Request) {
     }),
   );
 
+  await syncInBackground();
   return NextResponse.json({ results });
 }

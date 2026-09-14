@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import crypto from "node:crypto";
 import { getDb } from "@/lib/db";
 import { autoGrade } from "@/lib/scoring";
 import { isGrounder } from "@/lib/session";
 import type { ModelRow, Question } from "@/lib/types";
+import { syncInBackground } from "@/lib/sync";
 
 /** Records an answer the benchmarker obtained outside this app and pasted in. */
 export async function POST(request: Request) {
@@ -33,10 +35,10 @@ export async function POST(request: Request) {
 
   const info = db
     .prepare(
-      `INSERT INTO llm_runs (question_id, model_key, answer, reasoning, source)
-       VALUES (?, ?, ?, ?, 'manual')`,
+      `INSERT INTO llm_runs (uid, question_id, model_key, answer, reasoning, source)
+       VALUES (?, ?, ?, ?, ?, 'manual')`,
     )
-    .run(question.id, model.key, answer, body.reasoning?.trim() || null);
+    .run(crypto.randomUUID(), question.id, model.key, answer, body.reasoning?.trim() || null);
 
   const verdict = autoGrade(question, answer);
   if (verdict) {
@@ -46,5 +48,6 @@ export async function POST(request: Request) {
     ).run(info.lastInsertRowid, verdict);
   }
 
+  await syncInBackground();
   return NextResponse.json({ id: info.lastInsertRowid }, { status: 201 });
 }

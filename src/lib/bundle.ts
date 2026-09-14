@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { getDb, uploadPath } from "./db";
 import { autoGrade } from "./scoring";
-import type { AnswerType, Category, Question } from "./types";
+import type { AnswerType, Category, Question, Verdict } from "./types";
 
 export const BUNDLE_VERSION = 1;
 
@@ -39,6 +39,29 @@ export interface QuestionBundle {
   questions: BundleQuestion[];
 }
 
+export interface BundleRunTurn {
+  role: "user" | "assistant";
+  content: string;
+  error: string | null;
+}
+
+export interface BundleRun {
+  uid: string;
+  question_uid: string;
+  model_key: string;
+  /** Carried so the other side can name the model even without it configured. */
+  model_label: string | null;
+  answer: string | null;
+  reasoning: string | null;
+  error: string | null;
+  latency_ms: number | null;
+  source: "api" | "manual";
+  /** The grade the exporting install gave, so Results agree on both machines. */
+  verdict: Verdict | null;
+  turns: BundleRunTurn[];
+  created_at: string;
+}
+
 export interface BundleComment {
   uid: string;
   question_uid: string;
@@ -56,6 +79,8 @@ export interface ResponseBundle {
   responses: BundleResponse[];
   /** Optional so bundles written before comments existed still import. */
   comments?: BundleComment[];
+  /** Optional so bundles written before model answers synced still import. */
+  runs?: BundleRun[];
 }
 
 export type Bundle = QuestionBundle | ResponseBundle;
@@ -147,6 +172,30 @@ export function exportResponses({
     )
     .all() as BundleComment[];
 
+  const runRows = getDb()
+    .prepare(
+      `SELECT r.uid, q.uid AS question_uid, r.model_key, m.label AS model_label,
+              r.answer, r.reasoning, r.error, r.latency_ms, r.source, r.created_at,
+              g.verdict AS verdict
+       FROM llm_runs r
+       JOIN questions q ON q.id = r.question_id
+       LEFT JOIN models m ON m.key = r.model_key
+       LEFT JOIN grades g ON g.target_type = 'llm' AND g.target_id = r.id
+       ${localOnly ? "WHERE r.imported = 0" : ""}
+       ORDER BY r.id`,
+    )
+    .all() as (Omit<BundleRun, "turns"> & { uid: string })[];
+
+  const turnsFor = getDb().prepare(
+    `SELECT t.role, t.content, t.error FROM run_turns t
+     JOIN llm_runs r ON r.id = t.run_id
+     WHERE r.uid = ? ORDER BY t.id`,
+  );
+  const runs: BundleRun[] = runRows.map((run) => ({
+    ...run,
+    turns: turnsFor.all(run.uid) as BundleRunTurn[],
+  }));
+
   return {
     format: "traffic-bench",
     version: BUNDLE_VERSION,
@@ -154,6 +203,7 @@ export function exportResponses({
     exported_at: new Date().toISOString(),
     responses: rows,
     comments,
+    runs,
   };
 }
 
@@ -188,6 +238,7 @@ export interface ImportResult {
   skipped: number;
   unmatched: number;
   comments?: number;
+  runs?: number;
 }
 
 export function importQuestions(bundle: QuestionBundle): ImportResult {
@@ -308,7 +359,10 @@ export function importResponses(bundle: ResponseBundle): ImportResult {
       if (!c?.uid || !c.body || !c.question_uid) continue;
       if (commentExists.get(c.uid)) continue;
       const question = findQuestion.get(c.question_uid) as Question | undefined;
-      if (!question) continue;
+      if (!question) {
+        unmatched += 1;
+        continue;
+      }
       insertComment.run(
         c.uid,
         question.id,
@@ -321,8 +375,67 @@ export function importResponses(bundle: ResponseBundle): ImportResult {
     }
   });
 
+  // A model the other side used may not be configured here. Register it
+  // disabled, so its answers are labelled properly and it is never called.
+  const findModel = db.prepare("SELECT key FROM models WHERE key = ?");
+  const addModel = db.prepare(
+    `INSERT INTO models (key, label, provider, model_id, enabled)
+     VALUES (?, ?, 'manual', ?, 0)`,
+  );
+  const runExists = db.prepare("SELECT id FROM llm_runs WHERE uid = ?");
+  const insertRun = db.prepare(
+    `INSERT INTO llm_runs
+       (uid, question_id, model_key, answer, reasoning, error, latency_ms, source, created_at, imported)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+  );
+  const insertTurn = db.prepare(
+    "INSERT INTO run_turns (run_id, role, content, error) VALUES (?, ?, ?, ?)",
+  );
+  const setGrade = db.prepare(
+    `INSERT OR REPLACE INTO grades (target_type, target_id, verdict, grader)
+     VALUES ('llm', ?, ?, 'synced')`,
+  );
+
+  let runs = 0;
+  const runRuns = db.transaction((list: BundleRun[]) => {
+    for (const item of list) {
+      if (!item?.uid || !item.question_uid || !item.model_key) continue;
+      if (runExists.get(item.uid)) continue;
+      const question = findQuestion.get(item.question_uid) as Question | undefined;
+      if (!question) {
+        unmatched += 1;
+        continue;
+      }
+
+      if (!findModel.get(item.model_key)) {
+        addModel.run(item.model_key, item.model_label ?? item.model_key, item.model_key);
+      }
+
+      const info = insertRun.run(
+        item.uid,
+        question.id,
+        item.model_key,
+        item.answer ?? null,
+        item.reasoning ?? null,
+        item.error ?? null,
+        item.latency_ms ?? null,
+        item.source === "manual" ? "manual" : "api",
+        item.created_at ?? new Date().toISOString(),
+      );
+
+      for (const turn of item.turns ?? []) {
+        if (!turn?.role) continue;
+        insertTurn.run(info.lastInsertRowid, turn.role, turn.content ?? "", turn.error ?? null);
+      }
+      // The grounder has no reference answer, so the grade has to travel.
+      if (item.verdict) setGrade.run(info.lastInsertRowid, item.verdict);
+      runs += 1;
+    }
+  });
+
   run(bundle.responses);
   if (Array.isArray(bundle.comments)) runComments(bundle.comments);
+  if (Array.isArray(bundle.runs)) runRuns(bundle.runs);
 
-  return { kind: "responses", added, skipped, unmatched, comments };
+  return { kind: "responses", added, skipped, unmatched, comments, runs };
 }

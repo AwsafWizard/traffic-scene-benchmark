@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { isGrounder } from "@/lib/session";
+import { syncInBackground } from "@/lib/sync";
 
 export async function POST(request: Request) {
   if (await isGrounder()) {
@@ -28,5 +29,6 @@ export async function POST(request: Request) {
      VALUES (?, ?, ?, 'setter')`,
   ).run(body.target_type, body.target_id, body.verdict);
 
+  await syncInBackground();
   return NextResponse.json({ ok: true });
 }

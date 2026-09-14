@@ -61,6 +61,7 @@ function init(): Database.Database {
 
     CREATE TABLE IF NOT EXISTS llm_runs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      uid TEXT UNIQUE,
       question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
       model_key TEXT NOT NULL,
       answer TEXT,
@@ -69,6 +70,7 @@ function init(): Database.Database {
       latency_ms INTEGER,
       error TEXT,
       source TEXT NOT NULL DEFAULT 'api',
+      imported INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -133,18 +135,28 @@ function init(): Database.Database {
   }
   // Rows that arrived from another install are not re-published by folder sync,
   // so a shared folder doesn't accumulate every copy of everyone's data.
-  for (const table of ["questions", "human_responses", "comments"]) {
+  for (const table of ["questions", "human_responses", "comments", "llm_runs"]) {
     const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
     if (cols.length && !cols.some((c) => c.name === "imported")) {
       db.exec(`ALTER TABLE ${table} ADD COLUMN imported INTEGER NOT NULL DEFAULT 0`);
     }
   }
 
-  const backfill = db.prepare("UPDATE questions SET uid = ? WHERE id = ?");
-  for (const row of db.prepare("SELECT id FROM questions WHERE uid IS NULL").all() as {
-    id: number;
-  }[]) {
-    backfill.run(crypto.randomUUID(), row.id);
+  // Model answers gained a uid when they started syncing between installs.
+  const runColumnNames = (db.prepare("PRAGMA table_info(llm_runs)").all() as { name: string }[])
+    .map((c) => c.name);
+  if (!runColumnNames.includes("uid")) {
+    db.exec("ALTER TABLE llm_runs ADD COLUMN uid TEXT");
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_uid ON llm_runs(uid)");
+  }
+
+  for (const table of ["questions", "llm_runs"]) {
+    const backfill = db.prepare(`UPDATE ${table} SET uid = ? WHERE id = ?`);
+    for (const row of db.prepare(`SELECT id FROM ${table} WHERE uid IS NULL`).all() as {
+      id: number;
+    }[]) {
+      backfill.run(crypto.randomUUID(), row.id);
+    }
   }
 
   const count = db.prepare("SELECT COUNT(*) AS n FROM models").get() as { n: number };
