@@ -20,9 +20,9 @@ const BENCHMARKER_NAV = [
   { href: "/classify", label: "Classify" },
   { href: "/ground", label: "Ground" },
   { href: "/results", label: "Results" },
+  { href: "/stats", label: "Statistics" },
   { href: "/models", label: "Models" },
   { href: "/transfer", label: "Transfer" },
-  { href: "/share", label: "Share" },
 ];
 
 const GROUNDER_NAV = [

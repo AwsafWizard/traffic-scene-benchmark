@@ -23,8 +23,8 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000. That's enough to start writing questions and answering them — API
-keys are only needed when you want models to answer too.
+Open http://localhost:3000. That's everything — there are no API keys to configure, because
+model answers are run wherever you like and pasted in.
 
 <details>
 <summary>If your system Node is older than 20</summary>
@@ -36,30 +36,10 @@ stale chunks keep failing otherwise.
 
 </details>
 
-### API keys
+### Sharing a project
 
-Keys go in `.env.local` at the project root — **never into the app's UI**. Fill in only the
-providers you want, then restart the dev server. The Models page shows which keys it can see.
-
-```
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
-GOOGLE_API_KEY=AIza...
-```
-
-`GEMINI_API_KEY` works as an alias for `GOOGLE_API_KEY`. The file is gitignored and the keys
-are only ever read server-side, so they never reach the browser.
-
-### Finding model IDs
-
-Model IDs change often, so ask your own account instead of guessing:
-
-```bash
-npm run models
-```
-
-This prints the exact model strings each of your keys can see. Paste one into **Model ID** on
-the Models page. The model must accept image input.
+Nothing else is needed to work alone. To work with someone else, see
+[Working with a partner](#working-with-a-partner) — one shared setting, no accounts for them.
 
 ---
 
@@ -71,10 +51,10 @@ the Models page. The model must accept image input.
 2. **Ground** — the human sees only the image and the question. Never the reference answer,
    never the model answers. They give an answer, a confidence rating, and optionally their
    reasoning.
-3. **Compare** — once they've answered, everything is revealed. Run the models from here, then
-   grade each answer correct / partial / incorrect. Multiple choice is graded automatically;
-   free text you grade yourself.
-4. **Results** — accuracy per model, split by category, with the human row alongside.
+3. **Compare** — once they've answered, everything is revealed. Paste in what each model said,
+   then grade it correct / partial / incorrect. Formats with a reproducible check score
+   themselves; the rest you grade.
+4. **Statistics** — what the benchmark covers and how each model does across it.
 
 ### The taxonomy
 
@@ -109,6 +89,21 @@ page walks through them one at a time with the dimension pre-selected from the o
 Unclassified questions keep grounding, running and scoring as before; they just sit out the
 per-dimension results.
 
+## Statistics
+
+The **Statistics** tab is the overall picture:
+
+- **What has been asked** — questions by dimension, by verifiability, by modality, by answer
+  format, plus how much of the 27-type taxonomy has any question at all.
+- **How the models are doing** — accuracy per model across the six dimensions, then split by
+  verifiability and by answer format, with the human baseline on top. Every rate reads as
+  `accuracy / answers graded`, so you can see how much it rests on.
+- **Per fine-grained type** — human versus model accuracy and the gap between them.
+- **Types with no questions yet** — the gaps in coverage, listed so you know what to write next.
+
+Ungraded answers are excluded from every rate rather than counted as wrong, and the count of
+them is shown up top so a thin number never looks solid.
+
 ### Reading the question-quality table
 
 The second table on Results is about your *questions*, not the models:
@@ -127,7 +122,7 @@ question is actually measuring something.
 
 ## Working with a partner
 
-One person writes questions, another answers them cold. Four ways to arrange that, best first.
+One person writes questions, another answers them cold. Three ways to arrange that, best first.
 
 ### Cloud sync — recommended
 
@@ -184,12 +179,6 @@ curl https://rclone.org/install.sh | sudo bash   # once
 
 On Windows and macOS, Google Drive for Desktop handles it with no extra tooling — point the app
 at `G:\My Drive\traffic-bench` or the equivalent.
-
-### A link on the same network
-
-If you're in the same room, skip sync entirely. The **Share** page gives a link that puts your
-partner's browser into grounding mode against *your* running app — nothing for them to install.
-Works while your machine is awake and on the same network.
 
 ### Passing files by hand
 
@@ -265,34 +254,31 @@ next to the results.
 
 ## Models
 
-Add any number, from any provider, on the Models page. You supply the exact API model string;
-nothing is hardcoded.
+Models are answered **by hand**: you run a question wherever you like — a chat UI, an API
+script, a colleague's laptop — and paste the answer into the question's Compare page. The app
+makes no API calls and holds no keys.
+
+Add the models you're benchmarking on the Models page.
 
 | Field | What it is |
 | --- | --- |
 | **Display name** | The label in the results tables, e.g. `Gemini 2.5 Pro`. Yours to choose. |
-| **Provider** | Which API to call, or **Manual** for a model you run elsewhere. |
-| **Model ID** | The exact API model string, from `npm run models`. |
-| **Short name** | Internal identifier, defaults to the Model ID. **Not an API key.** |
-| **Extra request params** | JSON merged into the API call — pin `temperature` here so runs stay comparable. |
+| **Provider** | Which family it belongs to — used to group results. |
+| **Model ID / version** | Which exact version answered, so results stay comparable later. |
+| **Short name** | Internal identifier, defaults to the Model ID. |
+| **Notes** | How you ran it — web UI, temperature, system prompt. |
 
-Only enabled models run. Disabling one keeps its past results in the tables.
+### Recording an answer
 
-### Answers you got elsewhere
-
-For a model you have no API key for — a chat UI, something behind a paywall — add it with
-provider **Manual**, then use **"Paste an answer by hand"** on the Compare page. Pasted answers
-are scored like any other and carry a **PASTED** badge so you can tell them apart later. Manual
-models are skipped when you run models, rather than failing.
+**"Paste an answer by hand"** on any question's Compare page. Optionally paste the model's
+reasoning too. Answers carry a **PASTED** badge, and are scored like anything else.
 
 ### Follow-up threads
 
-Under any model answer, **Ask a follow-up** starts a conversation with that model about its own
-answer — the image and the full thread go back each turn, so you can push on shaky reasoning
-("what makes you say the van is indicating?").
-
-Follow-ups reply in prose rather than the scored JSON format, and don't change the original
-answer or its grade. For manual models you paste the reply in alongside your question.
+Under any model answer, **Ask a follow-up** records a further exchange — the question you put
+to the model and the reply it gave you. Useful for pushing on shaky reasoning ("what makes you
+say the van is indicating?") without losing the thread. Follow-ups don't change the original
+answer or its grade.
 
 ---
 
@@ -300,10 +286,8 @@ answer or its grade. For manual models you paste the reply in alongside your que
 
 - Data lives in `data/` — SQLite plus uploaded images. It's gitignored, so cloning this repo
   gives you the tool and none of the data. Back it up yourself if the answers matter.
-- Model calls run in parallel, and failures are recorded per model rather than failing the whole
-  run, so one bad key doesn't lose the others' answers.
-- Every run is stored, so re-running a question keeps the history; Compare shows the most recent
-  answer per model.
+- Every answer is stored, so re-recording one keeps the history; Compare shows the most recent
+  per model.
 - Schema changes migrate on startup, so after pulling an update **restart the dev server** — hot
   reload keeps the old database connection and you'll see "no such column" until you do.
 - Free Supabase projects pause after about a week of inactivity; sync fails until someone

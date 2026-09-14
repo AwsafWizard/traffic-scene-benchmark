@@ -49,47 +49,11 @@ export function VerdictPicker({
   );
 }
 
-export function RunModelsButton({ questionId, hasRuns }: { questionId: number; hasRuns: boolean }) {
-  const router = useRouter();
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function run() {
-    setRunning(true);
-    setError(null);
-    const response = await fetch("/api/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question_id: questionId }),
-    });
-    if (!response.ok) {
-      setError(await errorMessage(response, "Run failed"));
-    }
-    setRunning(false);
-    router.refresh();
-  }
-
-  return (
-    <div className="flex flex-col items-end gap-2">
-      <button
-        onClick={run}
-        disabled={running}
-        className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-      >
-        {running ? "Running…" : hasRuns ? "Re-run models" : "Run models"}
-      </button>
-      {error && <p className="text-xs text-red-500">{error}</p>}
-    </div>
-  );
-}
-
 export function FollowUpThread({
   runId,
-  isManual,
   turns,
 }: {
   runId: number;
-  isManual: boolean;
   turns: { id: number; role: "user" | "assistant"; content: string; error: string | null }[];
 }) {
   const router = useRouter();
@@ -162,15 +126,13 @@ export function FollowUpThread({
           placeholder="Ask the model something about its answer…"
           className={input}
         />
-        {isManual && (
-          <textarea
-            rows={2}
-            value={answer}
-            onChange={(e) => setAnswer(e.target.value)}
-            placeholder="Paste the model's reply (manual model)"
-            className={input}
-          />
-        )}
+        <textarea
+          rows={2}
+          value={answer}
+          onChange={(e) => setAnswer(e.target.value)}
+          placeholder="Paste the model's reply"
+          className={input}
+        />
         {error && <p className="text-xs text-red-500">{error}</p>}
         <div className="flex gap-2">
           <button

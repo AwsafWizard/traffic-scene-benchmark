@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { isGrounder } from "@/lib/session";
+import { syncInBackground } from "@/lib/sync";
 
 const FORBIDDEN = NextResponse.json({ error: "Not allowed" }, { status: 403 });
 
@@ -35,13 +36,13 @@ export async function POST(request: Request) {
   const label = (body.label ?? "").trim();
   const provider = (body.provider ?? "").trim();
   // A manual model needs no real model string, so fall back to its display name.
-  const modelId = (body.model_id ?? "").trim() || (provider === "manual" ? label : "");
+  const modelId = (body.model_id ?? "").trim() || label;
   const key = (body.key ?? "").trim() || modelId;
   const extra = (body.extra ?? "").trim();
 
   if (!label) return NextResponse.json({ error: "A display name is required" }, { status: 400 });
-  if (!["anthropic", "openai", "google", "manual"].includes(provider)) {
-    return NextResponse.json({ error: "Unknown provider" }, { status: 400 });
+  if (!provider) {
+    return NextResponse.json({ error: "A provider is required" }, { status: 400 });
   }
   if (!modelId) return NextResponse.json({ error: "A model ID is required" }, { status: 400 });
   if (looksLikeSecret(modelId) || looksLikeSecret(key)) {
@@ -53,14 +54,6 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  if (extra) {
-    try {
-      JSON.parse(extra);
-    } catch {
-      return NextResponse.json({ error: "Extra params must be valid JSON" }, { status: 400 });
-    }
-  }
-
   try {
     getDb()
       .prepare("INSERT INTO models (key, label, provider, model_id, extra) VALUES (?, ?, ?, ?, ?)")
@@ -68,6 +61,7 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: `Model "${key}" already exists` }, { status: 409 });
   }
+  await syncInBackground();
   return NextResponse.json({ ok: true }, { status: 201 });
 }
 

@@ -411,8 +411,7 @@ export function importResponses(bundle: ResponseBundle): ImportResult {
     }
   });
 
-  // A model the other side used may not be configured here. Register it
-  // disabled, so its answers are labelled properly and it is never called.
+  // A model the other side used may not be on this copy's roster yet.
   const findModel = db.prepare("SELECT key FROM models WHERE key = ?");
   const addModel = db.prepare(
     `INSERT INTO models (key, label, provider, model_id, enabled)

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ROLE_COOKIE, setInstallRole } from "@/lib/session";
+import { setInstallRole } from "@/lib/session";
 import type { Role } from "@/lib/types";
 
 /**
@@ -14,9 +14,5 @@ export async function PUT(request: Request) {
   }
 
   setInstallRole(body.role);
-
-  // A per-browser cookie would otherwise keep overriding the new setting.
-  const response = NextResponse.json({ role: body.role });
-  response.cookies.delete(ROLE_COOKIE);
-  return response;
+  return NextResponse.json({ role: body.role });
 }

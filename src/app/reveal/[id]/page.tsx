@@ -9,7 +9,6 @@ import {
   DeleteQuestionButton,
   FollowUpThread,
   ManualAnswerForm,
-  RunModelsButton,
   VerdictPicker,
 } from "./RevealControls";
 
@@ -174,16 +173,13 @@ export default async function RevealPage({ params }: PageProps<"/reveal/[id]">) 
         </section>
 
         <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
-              Model answers
-            </h2>
-            <RunModelsButton questionId={question.id} hasRuns={latestRuns.length > 0} />
-          </div>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
+            Model answers
+          </h2>
 
           {latestRuns.length === 0 && (
             <p className="rounded-xl border border-line bg-surface p-4 text-sm text-muted">
-              No model runs yet.
+              No model answers yet — paste one in below.
             </p>
           )}
 
@@ -210,7 +206,6 @@ export default async function RevealPage({ params }: PageProps<"/reveal/[id]">) 
                     {run.reasoning && <p className="mt-1 text-sm text-muted">{run.reasoning}</p>}
                     <FollowUpThread
                       runId={run.id}
-                      isManual={run.provider === "manual"}
                       turns={turnsByRun.get(run.id) ?? []}
                     />
                   </>
