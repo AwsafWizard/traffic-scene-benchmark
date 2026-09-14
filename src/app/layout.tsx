@@ -19,7 +19,6 @@ const BENCHMARKER_NAV = [
   { href: "/setter", label: "Add question" },
   { href: "/classify", label: "Classify" },
   { href: "/ground", label: "Ground" },
-  { href: "/results", label: "Results" },
   { href: "/stats", label: "Statistics" },
   { href: "/models", label: "Models" },
   { href: "/transfer", label: "Transfer" },

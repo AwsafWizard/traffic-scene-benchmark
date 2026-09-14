@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { computeDetailedStats, type Scored } from "@/lib/detailed-stats";
+import { computeDetailedStats, type Flag, type Scored } from "@/lib/detailed-stats";
 import { requireBenchmarkerPage } from "@/lib/session";
 import {
   DIMENSIONS,
@@ -54,13 +54,36 @@ function Stat({ label, value, hint }: { label: string; value: string | number; h
   );
 }
 
+const FLAGS: Record<Flag, { text: string; style: string; why: string }> = {
+  discriminative: {
+    text: "discriminative",
+    style: "border-emerald-500/30 bg-emerald-500/10 text-emerald-600",
+    why: "Humans got it right and models got it wrong — the question you want more of.",
+  },
+  ambiguous: {
+    text: "ambiguous",
+    style: "border-amber-500/30 bg-amber-500/10 text-amber-600",
+    why: "Grounders disagreed with each other. Usually the wording needs work, not the model.",
+  },
+  "too-easy": {
+    text: "too easy",
+    style: "border-slate-500/30 bg-slate-500/10 text-slate-500",
+    why: "Every model got it right, so it carries no signal.",
+  },
+  "hard-for-humans": {
+    text: "hard for humans",
+    style: "border-red-500/30 bg-red-500/10 text-red-500",
+    why: "Humans got it wrong — suspect the reference answer or the image before the model.",
+  },
+};
+
 const th = "px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-muted";
 const td = "px-3 py-2 text-sm";
 
 export default async function StatsPage() {
   await requireBenchmarkerPage();
   const stats = computeDetailedStats();
-  const { inventory: inv, performers, coverage, emptyTypes, totals } = stats;
+  const { inventory: inv, performers, coverage, questions, emptyTypes, totals } = stats;
 
   if (inv.questions === 0) {
     return (
@@ -408,6 +431,84 @@ export default async function StatsPage() {
                   </td>
                 </tr>
               )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* ---------- per question ---------- */}
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
+            Per question
+          </h2>
+          <p className="mt-1 text-sm text-muted">
+            The tables above say which <em>types</em> are working. This says which individual
+            question to rewrite. Sorted by gap, widest first.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {(Object.keys(FLAGS) as Flag[]).map((f) => (
+            <span
+              key={f}
+              title={FLAGS[f].why}
+              className={`rounded border px-2 py-0.5 text-xs ${FLAGS[f].style}`}
+            >
+              {FLAGS[f].text}
+            </span>
+          ))}
+        </div>
+
+        <div className="overflow-x-auto rounded-xl border border-line bg-surface">
+          <table className="w-full min-w-[720px]">
+            <thead>
+              <tr className="border-b border-line">
+                <th className={th}>Question</th>
+                <th className={th}>Human</th>
+                <th className={th}>Models</th>
+                <th className={th}>Gap</th>
+                <th className={th}>Signal</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {questions.map((q) => (
+                <tr key={q.id}>
+                  <td className={`${td} max-w-sm`}>
+                    <Link href={`/reveal/${q.id}`} className="line-clamp-2 hover:text-accent">
+                      {q.prompt}
+                    </Link>
+                    <span className="text-xs text-muted">
+                      {q.type_code ?? "unclassified"} · {q.humanCount} human · {q.modelCount}{" "}
+                      model
+                    </span>
+                  </td>
+                  <td className={`${td} tabular-nums`}>{pct(q.humanAccuracy)}</td>
+                  <td className={`${td} tabular-nums`}>{pct(q.modelAccuracy)}</td>
+                  <td className={`${td} tabular-nums`}>
+                    {q.gap == null ? (
+                      <span className="text-muted">—</span>
+                    ) : (
+                      <span className={q.gap > 0 ? "text-emerald-500" : "text-muted"}>
+                        {q.gap > 0 ? "+" : ""}
+                        {Math.round(q.gap * 100)}
+                      </span>
+                    )}
+                  </td>
+                  <td className={td}>
+                    {q.flag ? (
+                      <span
+                        title={FLAGS[q.flag].why}
+                        className={`rounded border px-2 py-0.5 text-xs ${FLAGS[q.flag].style}`}
+                      >
+                        {FLAGS[q.flag].text}
+                      </span>
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

@@ -54,7 +54,8 @@ Nothing else is needed to work alone. To work with someone else, see
 3. **Compare** — once they've answered, everything is revealed. Paste in what each model said,
    then grade it correct / partial / incorrect. Formats with a reproducible check score
    themselves; the rest you grade.
-4. **Statistics** — what the benchmark covers and how each model does across it.
+4. **Statistics** — what the benchmark covers, how each model does across it, and which
+   individual questions are earning their place.
 
 ### The taxonomy
 
@@ -99,14 +100,15 @@ The **Statistics** tab is the overall picture:
   verifiability and by answer format, with the human baseline on top. Every rate reads as
   `accuracy / answers graded`, so you can see how much it rests on.
 - **Per fine-grained type** — human versus model accuracy and the gap between them.
+- **Per question** — human versus model on each individual question, with a signal flag.
 - **Types with no questions yet** — the gaps in coverage, listed so you know what to write next.
 
 Ungraded answers are excluded from every rate rather than counted as wrong, and the count of
 them is shown up top so a thin number never looks solid.
 
-### Reading the question-quality table
+### Reading the signal flags
 
-The second table on Results is about your *questions*, not the models:
+The per-question table is about your *questions*, not the models:
 
 | Flag | Meaning |
 | --- | --- |
@@ -116,7 +118,8 @@ The second table on Results is about your *questions*, not the models:
 | **hard for humans** | Humans got it wrong, so the reference answer or the image may be the problem. |
 
 The `gap` column is human accuracy minus model accuracy. The higher it is, the more that
-question is actually measuring something.
+question is actually measuring something. A large *negative* gap is worth a look too — it
+usually means the reference answer is wrong rather than that models beat your grounder.
 
 ---
 

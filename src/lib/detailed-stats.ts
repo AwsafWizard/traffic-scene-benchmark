@@ -83,10 +83,26 @@ export interface Inventory {
   typesTotal: number;
 }
 
+/** Why an individual question is, or isn't, earning its place. */
+export type Flag = "discriminative" | "too-easy" | "ambiguous" | "hard-for-humans";
+
+export interface QuestionStat {
+  id: number;
+  prompt: string;
+  type_code: string | null;
+  humanCount: number;
+  modelCount: number;
+  humanAccuracy: number | null;
+  modelAccuracy: number | null;
+  gap: number | null;
+  flag: Flag | null;
+}
+
 export interface DetailedStats {
   inventory: Inventory;
   performers: Performer[];
   coverage: TypeCoverage[];
+  questions: QuestionStat[];
   emptyTypes: { code: string; name: string; dimension: number }[];
   totals: {
     humanAnswers: number;
@@ -116,12 +132,13 @@ export function computeDetailedStats(): DetailedStats {
 
   const questions = db
     .prepare(
-      `SELECT id, type_code, category, verifiability, modality, answer_format, answer_type,
-              reference_answer
+      `SELECT id, prompt, type_code, category, verifiability, modality, answer_format,
+              answer_type, reference_answer
        FROM questions`,
     )
     .all() as {
     id: number;
+    prompt: string;
     type_code: string | null;
     category: string;
     verifiability: string | null;
@@ -203,6 +220,17 @@ export function computeDetailedStats(): DetailedStats {
        LEFT JOIN grades g ON g.target_type = 'human' AND g.target_id = h.id`,
     )
     .all() as Row[];
+
+  // Two grounders giving different answers is what "ambiguous" means, so the
+  // raw answer text is needed alongside the verdicts.
+  const humanAnswersById = new Map<number, string[]>();
+  for (const row of db
+    .prepare("SELECT question_id, answer FROM human_responses")
+    .all() as { question_id: number; answer: string }[]) {
+    const list = humanAnswersById.get(row.question_id) ?? [];
+    list.push(row.answer);
+    humanAnswersById.set(row.question_id, list);
+  }
 
   const performers = new Map<
     string,
@@ -303,10 +331,52 @@ export function computeDetailedStats(): DetailedStats {
     };
   });
 
+  // Per-question signal: the aggregates say which *type* is working, this says
+  // which individual question to rewrite.
+  const perQuestion: QuestionStat[] = questions
+    .map((q): QuestionStat => {
+      const qHumans = humanRows.filter((r) => r.question_id === q.id);
+      const qModels = modelRows.filter((r) => r.question_id === q.id);
+      const gradedHumans = qHumans.filter((r) => r.verdict);
+      const gradedModels = qModels.filter((r) => r.verdict);
+
+      const humanAccuracy = gradedHumans.length
+        ? gradedHumans.filter((r) => r.verdict === "correct").length / gradedHumans.length
+        : null;
+      const modelAccuracy = gradedModels.length
+        ? gradedModels.filter((r) => r.verdict === "correct").length / gradedModels.length
+        : null;
+
+      const distinctHumanAnswers = new Set(
+        humanAnswersById.get(q.id)?.map((a) => a.toLowerCase().trim()) ?? [],
+      ).size;
+
+      let flag: Flag | null = null;
+      if (qHumans.length > 1 && distinctHumanAnswers > 1) flag = "ambiguous";
+      else if (modelAccuracy === 1 && gradedModels.length > 1) flag = "too-easy";
+      else if (humanAccuracy === 1 && modelAccuracy === 0 && gradedModels.length > 0)
+        flag = "discriminative";
+      else if (humanAccuracy === 0 && gradedHumans.length > 0) flag = "hard-for-humans";
+
+      return {
+        id: q.id,
+        prompt: q.prompt,
+        type_code: q.type_code,
+        humanCount: qHumans.length,
+        modelCount: qModels.length,
+        humanAccuracy,
+        modelAccuracy,
+        gap: humanAccuracy != null && modelAccuracy != null ? humanAccuracy - modelAccuracy : null,
+        flag,
+      };
+    })
+    .sort((a, b) => (b.gap ?? -2) - (a.gap ?? -2));
+
   return {
     inventory,
     performers: performerList,
     coverage,
+    questions: perQuestion,
     emptyTypes: TYPES.filter((t) => !questionsPerType.has(t.code)).map((t) => ({
       code: t.code,
       name: t.name,
