@@ -1,20 +1,21 @@
 import Link from "next/link";
 import { getDb } from "@/lib/db";
 import { requireBenchmarkerPage } from "@/lib/session";
+import TypeBadges from "./TypeBadges";
 import type { Question } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 type Row = Question & { human_count: number; run_count: number };
 
-const CATEGORY_STYLE: Record<string, string> = {
-  spatial: "bg-blue-500/10 text-blue-500",
-  logical: "bg-purple-500/10 text-purple-500",
-  behavioral: "bg-amber-500/10 text-amber-600",
-};
-
 export default async function Home() {
   await requireBenchmarkerPage();
+  const unclassified = (
+    getDb()
+      .prepare("SELECT COUNT(*) AS n FROM questions WHERE type_code IS NULL")
+      .get() as { n: number }
+  ).n;
+
   const rows = getDb()
     .prepare(
       `SELECT q.*,
@@ -48,6 +49,17 @@ export default async function Home() {
         <span className="text-sm text-muted">{rows.length} total</span>
       </div>
 
+      {unclassified > 0 && (
+        <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-600">
+          {unclassified} question{unclassified === 1 ? "" : "s"} predate the taxonomy and have no
+          fine-grained type.{" "}
+          <Link href="/classify" className="underline">
+            Classify them
+          </Link>{" "}
+          — they keep working either way, but they won&apos;t appear in the per-dimension results.
+        </p>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {rows.map((q) => (
           <div
@@ -61,16 +73,7 @@ export default async function Home() {
               className="h-40 w-full object-cover"
             />
             <div className="flex flex-1 flex-col gap-3 p-4">
-              <div className="flex flex-wrap gap-2">
-                <span
-                  className={`rounded px-2 py-0.5 text-xs font-medium ${CATEGORY_STYLE[q.category]}`}
-                >
-                  {q.category}
-                </span>
-                <span className="rounded bg-foreground/5 px-2 py-0.5 text-xs text-muted">
-                  {q.answer_type === "mcq" ? "multiple choice" : "free text"}
-                </span>
-              </div>
+              <TypeBadges question={q} />
               <p className="flex-1 text-sm leading-relaxed">{q.prompt}</p>
               <div className="text-xs text-muted">
                 {q.human_count} human {q.human_count === 1 ? "answer" : "answers"} ·{" "}

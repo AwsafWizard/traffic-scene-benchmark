@@ -1,3 +1,4 @@
+/** The pre-taxonomy category. Kept only to suggest a dimension when reclassifying. */
 export type Category = "spatial" | "logical" | "behavioral";
 export type AnswerType = "mcq" | "free";
 /** Providers we can call over an API. */
@@ -16,6 +17,13 @@ export interface Question {
   category: Category;
   answer_type: AnswerType;
   options: string | null;
+  /** Fine-grained taxonomy type, e.g. "3.5". Null until classified. */
+  type_code: string | null;
+  verifiability: string | null;
+  modality: string | null;
+  /** JSON array of grounding probe codes. */
+  probes: string | null;
+  answer_format: string | null;
   reference_answer: string | null;
   notes: string | null;
   /** 1 when this question arrived from another install. */

@@ -139,7 +139,9 @@ export function SyncSettings({ config }: { config: SyncConfig }) {
           {result.pulled.questions === 1 ? "" : "s"}, {result.pulled.answers} answer
           {result.pulled.answers === 1 ? "" : "s"}, {result.pulled.comments} comment
           {result.pulled.comments === 1 ? "" : "s"}, {result.pulled.runs} model answer
-          {result.pulled.runs === 1 ? "" : "s"} from {result.filesSeen} file
+          {result.pulled.runs === 1 ? "" : "s"}
+          {result.pulled.models > 0 && `, ${result.pulled.models} model`}
+          {result.pulled.models > 1 ? "s" : ""} from {result.filesSeen} file
           {result.filesSeen === 1 ? "" : "s"}.
           {result.pushed.length > 0 && ` Wrote ${result.pushed.join(", ")}.`}
         </p>
@@ -169,7 +171,8 @@ export function SyncPoller({ intervalMs = 30000 }: { intervalMs?: number }) {
           result.pulled.questions +
           result.pulled.answers +
           result.pulled.comments +
-          result.pulled.runs;
+          result.pulled.runs +
+          result.pulled.models;
         if (total > 0) {
           setPulled(total);
           router.refresh();

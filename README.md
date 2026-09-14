@@ -65,9 +65,9 @@ the Models page. The model must accept image input.
 
 ## The workflow
 
-1. **Add question** — upload a scene, write the question, tag it spatial / logical /
-   behavioral, and pick multiple-choice or free text. A reference answer is optional for free
-   text; for multiple choice it enables automatic scoring.
+1. **Add question** — upload a scene, write the question, and pick its fine-grained taxonomy
+   type. The type decides the rest: how checkable the answer is, whether a frame is enough,
+   which grounding probes apply, and how it's scored. Every default stays editable.
 2. **Ground** — the human sees only the image and the question. Never the reference answer,
    never the model answers. They give an answer, a confidence rating, and optionally their
    reasoning.
@@ -75,6 +75,39 @@ the Models page. The model must accept image input.
    grade each answer correct / partial / incorrect. Multiple choice is graded automatically;
    free text you grade yourself.
 4. **Results** — accuracy per model, split by category, with the human row alongside.
+
+### The taxonomy
+
+Questions are classified on two levels: one of six **dimensions**, then a **fine-grained type**
+within it — 27 in all, from *object existence (hallucination trap)* to *informal-behaviour
+reasoning*. Types marked ★ are ones that only arise in South Asian traffic, or that it makes
+much harder.
+
+Each type carries three labels:
+
+| | Meaning |
+| --- | --- |
+| **V** verifiable | Readable straight from the pixels; annotators will agree. |
+| **C** context / consensus | Verifiable once you state a rule or take a majority vote. |
+| **I** inferential | Prediction or intention — score the reasoning, not a ground truth. |
+
+plus a **modality** (single frame, or needs a clip) and a set of **grounding probes** — BLANK,
+NO-IMG, SWAP, CF, LOC, OCR — the checks that tell genuine visual reading from a language prior.
+
+Answer formats replace the old multiple-choice/free-text split with nine codes: `BIN`, `MCQ`,
+`MSEL`, `NUM`, `SA`, `GND`, `RANK`, `STR`, `FT`. Five of them score automatically —
+binary, multiple choice and short answer by normalised match, numeric with an off-by-k
+tolerance, multi-select by set overlap (which is what returns a *partial*). Grounded, ranking,
+structured and free-text answers need a human or a rubric, so the app leaves them to you.
+
+### Questions written before the taxonomy
+
+Their answer format carried over exactly — `mcq` became `MCQ`, free text became `FT`, so
+nothing changed about how they're scored. The fine-grained type can't be inferred from
+"spatial / logical / behavioral", so it was left empty rather than guessed. The **Classify**
+page walks through them one at a time with the dimension pre-selected from the old label.
+Unclassified questions keep grounding, running and scoring as before; they just sit out the
+per-dimension results.
 
 ### Reading the question-quality table
 
@@ -185,6 +218,10 @@ only rewritten when their content actually changes, so two idle installs generat
 
 Pushes happen the moment a question, answer, or comment is saved; each copy also pulls every 30
 seconds while a tab is open. It's eventual, not instant.
+
+The model roster travels as well, so both copies benchmark the same set. Models arriving from
+the other side are added **disabled** — nothing is ever called without your own key, and API
+keys are never in the bundle since each install reads its own from `.env.local`.
 
 Model answers travel too, including ones pasted by hand, their follow-up threads, and the grade
 you gave them — so both of you see the same Results. A model the other side used but you

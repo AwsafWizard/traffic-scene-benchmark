@@ -17,6 +17,7 @@ export const metadata: Metadata = {
 const BENCHMARKER_NAV = [
   { href: "/", label: "Questions" },
   { href: "/setter", label: "Add question" },
+  { href: "/classify", label: "Classify" },
   { href: "/ground", label: "Ground" },
   { href: "/results", label: "Results" },
   { href: "/models", label: "Models" },

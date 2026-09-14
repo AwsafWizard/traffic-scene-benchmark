@@ -1,5 +1,6 @@
 import { getDb } from "./db";
 import { normalize } from "./scoring";
+import { LEGACY_CATEGORY_DIMENSION, dimensionOf } from "./taxonomy";
 import type { Category, Verdict } from "./types";
 
 interface Tally {
@@ -15,7 +16,7 @@ interface Tally {
 export interface Scored extends Omit<Tally, "latency"> {
   accuracy: number | null;
   latency_p50: number | null;
-  by_category: Partial<Record<Category, Scored>>;
+  by_dimension: Partial<Record<number, Scored>>;
 }
 
 export interface QuestionStat {
@@ -55,15 +56,15 @@ function median(xs: number[]): number | null {
   return s[Math.floor(s.length / 2)];
 }
 
-function score(t: Tally, byCategory?: Map<Category, Tally>): Scored {
+function score(t: Tally, byDimension?: Map<number, Tally>): Scored {
   const { latency, ...rest } = t;
   return {
     ...rest,
     latency_p50: median(latency),
     // A partial answer counts as half credit.
     accuracy: t.graded ? (t.correct + t.partial * 0.5) / t.graded : null,
-    by_category: byCategory
-      ? Object.fromEntries([...byCategory.entries()].map(([c, v]) => [c, score(v)]))
+    by_dimension: byDimension
+      ? Object.fromEntries([...byDimension.entries()].map(([c, v]) => [c, score(v)]))
       : {},
   };
 }
@@ -74,7 +75,7 @@ export function computeStats(): Stats {
   const runs = db
     .prepare(
       `SELECT r.id, r.question_id, r.model_key, r.latency_ms, r.error,
-              q.category, m.label AS model_label, g.verdict
+              q.type_code, q.category, m.label AS model_label, g.verdict
        FROM llm_runs r
        JOIN questions q ON q.id = r.question_id
        LEFT JOIN models m ON m.key = r.model_key
@@ -88,12 +89,13 @@ export function computeStats(): Stats {
     latency_ms: number | null;
     error: string | null;
     category: Category;
+    type_code: string | null;
     verdict: Verdict | null;
   }[];
 
   const humans = db
     .prepare(
-      `SELECT h.id, h.question_id, h.answer, q.category, g.verdict
+      `SELECT h.id, h.question_id, h.answer, q.type_code, q.category, g.verdict
        FROM human_responses h
        JOIN questions q ON q.id = h.question_id
        LEFT JOIN grades g ON g.target_type = 'human' AND g.target_id = h.id`,
@@ -103,12 +105,13 @@ export function computeStats(): Stats {
     question_id: number;
     answer: string;
     category: Category;
+    type_code: string | null;
     verdict: Verdict | null;
   }[];
 
   const byModel = new Map<
     string,
-    { label: string; overall: Tally; byCategory: Map<Category, Tally> }
+    { label: string; overall: Tally; byCategory: Map<number, Tally> }
   >();
   for (const run of runs) {
     if (!byModel.has(run.model_key)) {
@@ -119,8 +122,9 @@ export function computeStats(): Stats {
       });
     }
     const entry = byModel.get(run.model_key)!;
-    if (!entry.byCategory.has(run.category)) entry.byCategory.set(run.category, blank());
-    const cat = entry.byCategory.get(run.category)!;
+    const dim = dimensionOf(run.type_code) ?? LEGACY_CATEGORY_DIMENSION[run.category] ?? 0;
+    if (!entry.byCategory.has(dim)) entry.byCategory.set(dim, blank());
+    const cat = entry.byCategory.get(dim)!;
 
     if (run.error) {
       entry.overall.errors += 1;
@@ -133,15 +137,16 @@ export function computeStats(): Stats {
   }
 
   const humanOverall = blank();
-  const humanByCategory = new Map<Category, Tally>();
+  const humanByCategory = new Map<number, Tally>();
   for (const h of humans) {
-    if (!humanByCategory.has(h.category)) humanByCategory.set(h.category, blank());
+    const hdim = dimensionOf(h.type_code) ?? LEGACY_CATEGORY_DIMENSION[h.category] ?? 0;
+    if (!humanByCategory.has(hdim)) humanByCategory.set(hdim, blank());
     add(humanOverall, h.verdict);
-    add(humanByCategory.get(h.category)!, h.verdict);
+    add(humanByCategory.get(hdim)!, h.verdict);
   }
 
   const questions = db
-    .prepare("SELECT id, prompt, category FROM questions ORDER BY id DESC")
+    .prepare("SELECT id, prompt, category, type_code FROM questions ORDER BY id DESC")
     .all() as { id: number; prompt: string; category: Category }[];
 
   const perQuestion = questions.map((q): QuestionStat => {

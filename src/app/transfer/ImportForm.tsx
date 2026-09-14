@@ -64,6 +64,12 @@ export default function ImportForm() {
             Imported {result.added} {result.kind === "questions" ? "question" : "answer"}
             {result.added === 1 ? "" : "s"}.
           </p>
+          {result.models != null && result.models > 0 && (
+            <p className="mt-1 text-xs">
+              Plus {result.models} model{result.models === 1 ? "" : "s"} added to your roster
+              (disabled, so nothing runs without your own key).
+            </p>
+          )}
           {result.runs != null && result.runs > 0 && (
             <p className="mt-1 text-xs">
               Plus {result.runs} model answer{result.runs === 1 ? "" : "s"}.

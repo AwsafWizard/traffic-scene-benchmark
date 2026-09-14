@@ -19,6 +19,12 @@ export interface BundleQuestion {
   answer_type: AnswerType;
   options: string[] | null;
   image: { media_type: string; data: string };
+  /** Taxonomy. Optional so bundles written before it still import. */
+  type_code?: string | null;
+  verifiability?: string | null;
+  modality?: string | null;
+  probes?: string[] | null;
+  answer_format?: string | null;
 }
 
 export interface BundleResponse {
@@ -62,6 +68,14 @@ export interface BundleRun {
   created_at: string;
 }
 
+export interface BundleModel {
+  key: string;
+  label: string;
+  provider: string;
+  model_id: string;
+  extra: string | null;
+}
+
 export interface BundleComment {
   uid: string;
   question_uid: string;
@@ -81,6 +95,8 @@ export interface ResponseBundle {
   comments?: BundleComment[];
   /** Optional so bundles written before model answers synced still import. */
   runs?: BundleRun[];
+  /** The model roster, so both copies agree on what is being benchmarked. */
+  models?: BundleModel[];
 }
 
 export type Bundle = QuestionBundle | ResponseBundle;
@@ -123,6 +139,11 @@ export function exportQuestions(
       category: q.category,
       answer_type: q.answer_type,
       options: q.options ? (JSON.parse(q.options) as string[]) : null,
+      type_code: q.type_code,
+      verifiability: q.verifiability,
+      modality: q.modality,
+      probes: q.probes ? (JSON.parse(q.probes) as string[]) : null,
+      answer_format: q.answer_format,
       image: {
         media_type: MEDIA[ext] ?? "image/png",
         data: fs.readFileSync(uploadPath(q.image_path)).toString("base64"),
@@ -196,6 +217,12 @@ export function exportResponses({
     turns: turnsFor.all(run.uid) as BundleRunTurn[],
   }));
 
+  // The roster travels so both copies benchmark the same set. Keys stay out of
+  // it — every install reads its own from .env.local.
+  const models = getDb()
+    .prepare("SELECT key, label, provider, model_id, extra FROM models ORDER BY key")
+    .all() as BundleModel[];
+
   return {
     format: "traffic-bench",
     version: BUNDLE_VERSION,
@@ -204,6 +231,7 @@ export function exportResponses({
     responses: rows,
     comments,
     runs,
+    models,
   };
 }
 
@@ -239,6 +267,7 @@ export interface ImportResult {
   unmatched: number;
   comments?: number;
   runs?: number;
+  models?: number;
 }
 
 export function importQuestions(bundle: QuestionBundle): ImportResult {
@@ -247,8 +276,10 @@ export function importQuestions(bundle: QuestionBundle): ImportResult {
 
   const existing = db.prepare("SELECT 1 FROM questions WHERE uid = ?");
   const insert = db.prepare(
-    `INSERT INTO questions (uid, image_path, prompt, category, answer_type, options, imported)
-     VALUES (?, ?, ?, ?, ?, ?, 1)`,
+    `INSERT INTO questions
+       (uid, image_path, prompt, category, answer_type, options, imported,
+        type_code, verifiability, modality, probes, answer_format)
+     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
   );
 
   let added = 0;
@@ -280,6 +311,11 @@ export function importQuestions(bundle: QuestionBundle): ImportResult {
         q.category,
         q.answer_type,
         q.options ? JSON.stringify(q.options) : null,
+        q.type_code ?? null,
+        q.verifiability ?? null,
+        q.modality ?? null,
+        q.probes ? JSON.stringify(q.probes) : null,
+        q.answer_format ?? null,
       );
       added += 1;
     }
@@ -396,6 +432,26 @@ export function importResponses(bundle: ResponseBundle): ImportResult {
      VALUES ('llm', ?, ?, 'synced')`,
   );
 
+  // Bring in the other side's roster first, so their runs land against a model
+  // that is already named here.
+  let models = 0;
+  const upsertModel = db.prepare(
+    `INSERT INTO models (key, label, provider, model_id, extra, enabled)
+     VALUES (?, ?, ?, ?, ?, 0)
+     ON CONFLICT(key) DO UPDATE SET
+       label = excluded.label,
+       model_id = excluded.model_id,
+       extra = excluded.extra`,
+  );
+  const runModels = db.transaction((list: BundleModel[]) => {
+    for (const m of list) {
+      if (!m?.key || !m.label) continue;
+      const existing = findModel.get(m.key) as { key: string } | undefined;
+      upsertModel.run(m.key, m.label, m.provider ?? "manual", m.model_id ?? m.key, m.extra ?? null);
+      if (!existing) models += 1;
+    }
+  });
+
   let runs = 0;
   const runRuns = db.transaction((list: BundleRun[]) => {
     for (const item of list) {
@@ -433,9 +489,10 @@ export function importResponses(bundle: ResponseBundle): ImportResult {
     }
   });
 
+  if (Array.isArray(bundle.models)) runModels(bundle.models);
   run(bundle.responses);
   if (Array.isArray(bundle.comments)) runComments(bundle.comments);
   if (Array.isArray(bundle.runs)) runRuns(bundle.runs);
 
-  return { kind: "responses", added, skipped, unmatched, comments, runs };
+  return { kind: "responses", added, skipped, unmatched, comments, runs, models };
 }

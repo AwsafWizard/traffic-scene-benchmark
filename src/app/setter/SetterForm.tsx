@@ -3,12 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { errorMessage } from "@/lib/fetch-error";
-
-const CATEGORIES = [
-  { value: "spatial", hint: "Where things are: lanes, distances, relative position, occlusion." },
-  { value: "logical", hint: "Rules and inference: right of way, sign/signal logic, legality." },
-  { value: "behavioral", hint: "What should happen next: predicted or correct driver action." },
-] as const;
+import { FORMAT_BY_CODE } from "@/lib/taxonomy";
+import TypePicker, { type TypeSelection } from "./TypePicker";
 
 const field =
   "w-full rounded-md border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-accent";
@@ -17,13 +13,16 @@ const label = "block text-sm font-medium mb-1.5";
 export default function SetterForm() {
   const router = useRouter();
   const [preview, setPreview] = useState<string | null>(null);
-  const [category, setCategory] = useState<string>("spatial");
-  const [answerType, setAnswerType] = useState("mcq");
+  const [type, setType] = useState<TypeSelection | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!type) {
+      setError("Pick a fine-grained type first — it decides how the answer is scored.");
+      return;
+    }
     setBusy(true);
     setError(null);
     const form = new FormData(event.currentTarget);
@@ -36,6 +35,10 @@ export default function SetterForm() {
     router.push("/");
     router.refresh();
   }
+
+  const spec = type ? FORMAT_BY_CODE.get(type.format) : null;
+  const needsOptions = spec?.hasOptions ?? false;
+  const autoGradable = spec?.autoGradable ?? false;
 
   return (
     <form onSubmit={submit} className="mx-auto max-w-2xl space-y-6">
@@ -89,57 +92,15 @@ export default function SetterForm() {
         </div>
 
         <div>
-          <span className={label}>Category</span>
-          <div className="grid gap-2 sm:grid-cols-3">
-            {CATEGORIES.map((c) => (
-              <label
-                key={c.value}
-                className={`cursor-pointer rounded-lg border p-3 text-sm transition ${
-                  category === c.value
-                    ? "border-accent bg-accent/5"
-                    : "border-line hover:bg-background"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="category"
-                  value={c.value}
-                  checked={category === c.value}
-                  onChange={() => setCategory(c.value)}
-                  className="sr-only"
-                />
-                <span className="font-medium capitalize">{c.value}</span>
-                <span className="mt-1 block text-xs leading-snug text-muted">{c.hint}</span>
-              </label>
-            ))}
-          </div>
+          <span className={label}>Type</span>
+          <p className="mb-3 text-xs text-muted">
+            The type sets how the answer is scored and which grounding probes apply. Pick the one
+            the question is really testing.
+          </p>
+          <TypePicker value={type} onChange={setType} />
         </div>
 
-        <div>
-          <span className={label}>Answer format</span>
-          <div className="flex gap-2">
-            {["mcq", "free"].map((t) => (
-              <label
-                key={t}
-                className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition ${
-                  answerType === t ? "border-accent bg-accent/5" : "border-line hover:bg-background"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="answer_type"
-                  value={t}
-                  checked={answerType === t}
-                  onChange={() => setAnswerType(t)}
-                  className="sr-only"
-                />
-                {t === "mcq" ? "Multiple choice" : "Free text"}
-              </label>
-            ))}
-          </div>
-        </div>
-
-        {answerType === "mcq" && (
+        {needsOptions && (
           <div>
             <label className={label} htmlFor="options">
               Options — one per line
@@ -158,8 +119,8 @@ export default function SetterForm() {
           <label className={label} htmlFor="reference_answer">
             Reference answer{" "}
             <span className="font-normal text-muted">
-              {answerType === "mcq"
-                ? "— must match one option exactly; enables auto-scoring"
+              {autoGradable
+                ? "— checked automatically against this"
                 : "— optional, used as your grading guide"}
             </span>
           </label>

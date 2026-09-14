@@ -28,6 +28,12 @@ function init(): Database.Database {
       category TEXT NOT NULL,
       answer_type TEXT NOT NULL,
       options TEXT,
+      -- Taxonomy: the fine-grained type carries the rest as defaults.
+      type_code TEXT,
+      verifiability TEXT,
+      modality TEXT,
+      probes TEXT,
+      answer_format TEXT,
       reference_answer TEXT,
       notes TEXT,
       -- 1 when this row arrived from another install, so folder sync doesn't
@@ -141,6 +147,31 @@ function init(): Database.Database {
       db.exec(`ALTER TABLE ${table} ADD COLUMN imported INTEGER NOT NULL DEFAULT 0`);
     }
   }
+
+  // The taxonomy replaced a three-way category and a two-way answer type.
+  const questionCols = (db.prepare("PRAGMA table_info(questions)").all() as { name: string }[])
+    .map((c) => c.name);
+  for (const [column, type] of [
+    ["type_code", "TEXT"],
+    ["verifiability", "TEXT"],
+    ["modality", "TEXT"],
+    ["probes", "TEXT"],
+    ["answer_format", "TEXT"],
+  ] as const) {
+    if (!questionCols.includes(column)) {
+      db.exec(`ALTER TABLE questions ADD COLUMN ${column} ${type}`);
+    }
+  }
+
+  // Old answer types map exactly, so no question loses how it is scored.
+  // The fine-grained type cannot be inferred from "spatial / logical /
+  // behavioral", so it stays null and the app asks for it.
+  db.exec(`
+    UPDATE questions SET answer_format = CASE
+      WHEN answer_type = 'mcq' THEN 'MCQ'
+      ELSE 'FT'
+    END WHERE answer_format IS NULL
+  `);
 
   // Model answers gained a uid when they started syncing between installs.
   const runColumnNames = (db.prepare("PRAGMA table_info(llm_runs)").all() as { name: string }[])

@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import type { Comment, Grade, HumanResponse, LlmRun, Question, RunTurn } from "@/lib/types";
 import CommentThread from "../../CommentThread";
 import { requireBenchmarkerPage } from "@/lib/session";
+import TypeBadges from "../../TypeBadges";
 import {
   DeleteQuestionButton,
   FollowUpThread,
@@ -97,10 +98,9 @@ export default async function RevealPage({ params }: PageProps<"/reveal/[id]">) 
         />
         <div className="rounded-xl border border-line bg-surface p-4">
           <p className="text-sm leading-relaxed">{question.prompt}</p>
-          <p className="mt-3 text-xs text-muted">
-            {question.category} ·{" "}
-            {question.answer_type === "mcq" ? "multiple choice" : "free text"}
-          </p>
+          <div className="mt-3">
+            <TypeBadges question={question} showProbes />
+          </div>
           {question.reference_answer && (
             <p className="mt-3 rounded-md bg-emerald-500/10 px-3 py-2 text-sm text-emerald-600 dark:text-emerald-400">
               <span className="font-medium">Reference:</span> {question.reference_answer}

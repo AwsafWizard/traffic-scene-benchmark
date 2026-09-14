@@ -1,11 +1,9 @@
 import Link from "next/link";
 import { computeStats, type Flag } from "@/lib/stats";
+import { DIMENSIONS } from "@/lib/taxonomy";
 import { requireBenchmarkerPage } from "@/lib/session";
-import type { Category } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
-
-const CATEGORIES: Category[] = ["spatial", "logical", "behavioral"];
 
 const FLAGS: Record<Flag, { text: string; style: string }> = {
   discriminative: {
@@ -55,7 +53,8 @@ export default async function ResultsPage() {
       <div>
         <h1 className="text-xl font-semibold">Results</h1>
         <p className="mt-1 text-sm text-muted">
-          Accuracy counts a partial answer as half credit. Only graded answers are scored.
+          Accuracy counts a partial answer as half credit. Only graded answers are scored. The
+          numbered columns are the taxonomy dimensions — hover for names.
         </p>
       </div>
 
@@ -65,9 +64,13 @@ export default async function ResultsPage() {
             <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
               <th className="px-4 py-3 font-medium">Answered by</th>
               <th className="px-4 py-3 font-medium">Overall</th>
-              {CATEGORIES.map((c) => (
-                <th key={c} className="px-4 py-3 font-medium capitalize">
-                  {c}
+              {DIMENSIONS.map((d) => (
+                <th
+                  key={d.id}
+                  title={d.name}
+                  className="px-4 py-3 font-medium"
+                >
+                  {d.id}
                 </th>
               ))}
               <th className="px-4 py-3 font-medium">Graded</th>
@@ -81,9 +84,9 @@ export default async function ResultsPage() {
                 <td className="px-4 py-3">
                   <Bar value={row.accuracy} />
                 </td>
-                {CATEGORIES.map((c) => (
-                  <td key={c} className="px-4 py-3 tabular-nums text-muted">
-                    {pct(row.by_category[c]?.accuracy ?? null)}
+                {DIMENSIONS.map((d) => (
+                  <td key={d.id} className="px-4 py-3 tabular-nums text-muted">
+                    {pct(row.by_dimension[d.id]?.accuracy ?? null)}
                   </td>
                 ))}
                 <td className="px-4 py-3 tabular-nums text-muted">
@@ -97,7 +100,7 @@ export default async function ResultsPage() {
             ))}
             {rows.length === 1 && stats.human.attempted === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-muted">
+                <td colSpan={DIMENSIONS.length + 3} className="px-4 py-6 text-center text-muted">
                   Nothing answered yet.
                 </td>
               </tr>

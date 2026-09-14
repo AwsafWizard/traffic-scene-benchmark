@@ -127,7 +127,13 @@ function remoteFor(config: SyncConfig): Remote {
 }
 
 export interface SyncResult {
-  pulled: { questions: number; answers: number; comments: number; runs: number };
+  pulled: {
+    questions: number;
+    answers: number;
+    comments: number;
+    runs: number;
+    models: number;
+  };
   pushed: string[];
   filesSeen: number;
   where: string;
@@ -145,7 +151,7 @@ export async function syncNow(): Promise<SyncResult> {
   if (config.mode === "off") throw new SyncError("Sync is turned off.");
 
   const remote = remoteFor(config);
-  const pulled = { questions: 0, answers: 0, comments: 0, runs: 0 };
+  const pulled = { questions: 0, answers: 0, comments: 0, runs: 0, models: 0 };
   let filesSeen = 0;
 
   const mine = new Set([
@@ -200,6 +206,7 @@ export async function syncNow(): Promise<SyncResult> {
       pulled.answers += result.added;
       pulled.comments += result.comments ?? 0;
       pulled.runs += result.runs ?? 0;
+      pulled.models += result.models ?? 0;
       // Rows referencing a question we haven't received yet must not mark the
       // file as read, or one bad pass would drop them for good.
       if (result.unmatched === 0) seen[file.name] = file.version;
@@ -284,7 +291,10 @@ export async function syncNow(): Promise<SyncResult> {
   const localRuns = (
     db.prepare("SELECT COUNT(*) AS n FROM llm_runs WHERE imported = 0").get() as { n: number }
   ).n;
-  if (localAnswers > 0 || localComments > 0 || localRuns > 0) {
+  const localModels = (
+    db.prepare("SELECT COUNT(*) AS n FROM models").get() as { n: number }
+  ).n;
+  if (localAnswers > 0 || localComments > 0 || localRuns > 0 || localModels > 0) {
     const name = `answers-${config.installId}.json`;
     const body = JSON.stringify(
       exportResponses({ includeSetterComments: false, localOnly: true }),
