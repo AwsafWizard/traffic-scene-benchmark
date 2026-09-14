@@ -14,7 +14,30 @@ export const ROLE_COOKIE = "bench-role";
  */
 export async function getRole(): Promise<Role> {
   const store = await cookies();
-  return store.get(ROLE_COOKIE)?.value === "grounder" ? "grounder" : "benchmarker";
+  const cookie = store.get(ROLE_COOKIE)?.value;
+  if (cookie === "grounder") return "grounder";
+  if (cookie === "benchmarker") return "benchmarker";
+  // No cookie: fall back to what this whole copy of the app is used for. A
+  // partner running their own install needs their work attributed to the
+  // grounder, or sync would withhold their comments as private setter notes.
+  return getInstallRole();
+}
+
+/** What this copy of the app is used for, when a browser hasn't said otherwise. */
+export function getInstallRole(): Role {
+  const row = getDb().prepare("SELECT value FROM settings WHERE key = 'install_role'").get() as
+    | { value: string }
+    | undefined;
+  return row?.value === "grounder" ? "grounder" : "benchmarker";
+}
+
+export function setInstallRole(role: Role): void {
+  getDb()
+    .prepare(
+      `INSERT INTO settings (key, value) VALUES ('install_role', ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    )
+    .run(role);
 }
 
 /** For pages: send grounders back to their queue instead of showing answers. */

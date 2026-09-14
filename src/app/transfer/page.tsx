@@ -1,9 +1,10 @@
 import { getDb } from "@/lib/db";
-import { getRole } from "@/lib/session";
+import { getInstallRole, getRole } from "@/lib/session";
 import { getSyncConfig } from "@/lib/sync";
 import ImportForm from "./ImportForm";
 import { SyncSettings } from "./SyncControls";
 import SupabaseSetup from "./SupabaseSetup";
+import RolePicker from "./RolePicker";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,7 @@ export default async function TransferPage() {
   const isGrounder = (await getRole()) === "grounder";
   const db = getDb();
   const sync = getSyncConfig();
+  const installRole = getInstallRole();
 
   const questionCount = (
     db.prepare("SELECT COUNT(*) AS n FROM questions").get() as { n: number }
@@ -29,6 +31,17 @@ export default async function TransferPage() {
           Images travel inside the file, so there is nothing else to send.
         </p>
       </div>
+
+      <section className="space-y-4 rounded-xl border border-line bg-surface p-5">
+        <div>
+          <h2 className="text-sm font-semibold">What this copy is for</h2>
+          <p className="mt-1 text-sm text-muted">
+            Set this once per machine. It decides what the app shows you, and whether your
+            comments travel to the other side as grounder feedback or stay here as private notes.
+          </p>
+        </div>
+        <RolePicker role={installRole} />
+      </section>
 
       <section className="space-y-4 rounded-xl border border-line bg-surface p-5">
         <div>
