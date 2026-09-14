@@ -3,6 +3,7 @@ import { getRole } from "@/lib/session";
 import { getSyncConfig } from "@/lib/sync";
 import ImportForm from "./ImportForm";
 import { SyncSettings } from "./SyncControls";
+import SupabaseSetup from "./SupabaseSetup";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +40,7 @@ export default async function TransferPage() {
           </p>
         </div>
         <SyncSettings config={sync} />
+        {!sync.supabaseConfigured && <SupabaseSetup />}
       </section>
 
       <section className="space-y-4 rounded-xl border border-line bg-surface p-5">
