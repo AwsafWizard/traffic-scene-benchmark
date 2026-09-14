@@ -21,6 +21,9 @@ export interface RemoteFile {
 
 export class RemoteError extends Error {}
 
+/** Questions live one-per-file under this prefix; see sync.ts. */
+export const QUESTION_PREFIX = "q/";
+
 export function folderRemote(dir: string): Remote {
   return {
     label: dir,
@@ -30,16 +33,27 @@ export function folderRemote(dir: string): Remote {
           `The sync folder has gone missing: ${dir}. If it's a Drive folder, check the sync client is running.`,
         );
       }
-      return fs.readdirSync(dir).map((name) => {
-        const stat = fs.statSync(path.join(dir, name));
-        return { name, version: `${stat.mtimeMs}:${stat.size}` };
-      });
+      const entries: RemoteFile[] = [];
+      const scan = (sub: string) => {
+        const full = path.join(dir, sub);
+        if (!fs.existsSync(full)) return;
+        for (const name of fs.readdirSync(full)) {
+          const stat = fs.statSync(path.join(full, name));
+          if (stat.isDirectory()) continue;
+          entries.push({ name: sub + name, version: `${stat.mtimeMs}:${stat.size}` });
+        }
+      };
+      scan("");
+      scan(QUESTION_PREFIX);
+      return entries;
     },
     async get(name) {
       return fs.readFileSync(path.join(dir, name), "utf8");
     },
     async put(name, contents) {
-      fs.writeFileSync(path.join(dir, name), contents);
+      const target = path.join(dir, name);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, contents);
     },
   };
 }
@@ -59,6 +73,11 @@ export function supabaseSettingsFromEnv(): SupabaseSettings | null {
     anonKey,
     bucket: process.env.SUPABASE_BUCKET?.trim() || "traffic-bench",
   };
+}
+
+/** Encodes each path segment but keeps the separators. */
+function encodePath(name: string): string {
+  return name.split("/").map(encodeURIComponent).join("/");
 }
 
 export function supabaseRemote({ url, anonKey, bucket }: SupabaseSettings): Remote {
@@ -83,25 +102,38 @@ export function supabaseRemote({ url, anonKey, bucket }: SupabaseSettings): Remo
   return {
     label: `Supabase bucket "${bucket}"`,
     async list() {
-      const response = await fetch(`${url}/storage/v1/object/list/${bucket}`, {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ prefix: "", limit: 200, offset: 0 }),
-      });
-      await check(response, "list");
-      const rows = (await response.json()) as {
-        name: string;
-        updated_at?: string;
-        metadata?: { size?: number };
-      }[];
-      return rows.map((row) => ({
-        name: row.name,
-        version: `${row.updated_at ?? ""}:${row.metadata?.size ?? ""}`,
-      }));
+      // Supabase lists one prefix at a time and reports subfolders as entries
+      // with a null id, so the questions prefix needs its own call.
+      const page = async (prefix: string): Promise<RemoteFile[]> => {
+        const out: RemoteFile[] = [];
+        for (let offset = 0; ; offset += 1000) {
+          const response = await fetch(`${url}/storage/v1/object/list/${bucket}`, {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ prefix, limit: 1000, offset }),
+          });
+          await check(response, "list");
+          const rows = (await response.json()) as {
+            id: string | null;
+            name: string;
+            updated_at?: string;
+            metadata?: { size?: number };
+          }[];
+          for (const row of rows) {
+            if (row.id === null) continue; // a folder, not an object
+            out.push({
+              name: prefix + row.name,
+              version: `${row.updated_at ?? ""}:${row.metadata?.size ?? ""}`,
+            });
+          }
+          if (rows.length < 1000) return out;
+        }
+      };
+      return [...(await page("")), ...(await page(QUESTION_PREFIX))];
     },
     async get(name) {
       const response = await fetch(
-        `${url}/storage/v1/object/${bucket}/${encodeURIComponent(name)}`,
+        `${url}/storage/v1/object/${bucket}/${encodePath(name)}`,
         { headers },
       );
       await check(response, "download");
@@ -109,7 +141,7 @@ export function supabaseRemote({ url, anonKey, bucket }: SupabaseSettings): Remo
     },
     async put(name, contents) {
       const response = await fetch(
-        `${url}/storage/v1/object/${bucket}/${encodeURIComponent(name)}`,
+        `${url}/storage/v1/object/${bucket}/${encodePath(name)}`,
         {
           method: "POST",
           headers: { ...headers, "Content-Type": "application/json", "x-upsert": "true" },

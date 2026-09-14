@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import {
+  BUNDLE_VERSION,
   exportQuestions,
   exportResponses,
   importQuestions,
@@ -10,6 +11,7 @@ import {
 } from "./bundle";
 import { getDb } from "./db";
 import {
+  QUESTION_PREFIX,
   RemoteError,
   folderRemote,
   supabaseRemote,
@@ -21,9 +23,13 @@ import {
  * Two installs stay in step by trading bundle files through a shared place —
  * a Supabase bucket, or a folder something else mirrors across machines.
  *
- * Each install owns two files named after its own id and never writes anyone
- * else's. Because imports are keyed by uid and idempotent, both sides converge
- * whatever order the files arrive in.
+ * Questions go one per file under `q/`, keyed by the question's own uid, so
+ * adding a question costs one small upload instead of rewriting a bundle that
+ * carries every image ever added. Answers stay in a single per-install file —
+ * they hold no images and are tiny.
+ *
+ * Imports are keyed by uid and idempotent, so both sides converge whatever
+ * order the files arrive in.
  */
 
 export type SyncMode = "off" | "folder" | "supabase";
@@ -153,7 +159,13 @@ export async function syncNow(): Promise<SyncResult> {
 
   for (const file of await remote.list()) {
     if (!file.name.endsWith(".json") || mine.has(file.name)) continue;
-    if (!file.name.startsWith("questions-") && !file.name.startsWith("answers-")) continue;
+
+    const isQuestion = file.name.startsWith(QUESTION_PREFIX);
+    // `questions-<id>.json` is the pre-split aggregate. Still read it, so an
+    // install that hasn't updated yet doesn't go silent.
+    const isLegacyAggregate = file.name.startsWith("questions-");
+    const isAnswers = file.name.startsWith("answers-");
+    if (!isQuestion && !isLegacyAggregate && !isAnswers) continue;
 
     filesSeen += 1;
     if (seen[file.name] === file.version) continue;
@@ -182,18 +194,59 @@ export async function syncNow(): Promise<SyncResult> {
   const pushed: string[] = [];
   const db = getDb();
 
-  const localQuestions = (
-    db.prepare("SELECT COUNT(*) AS n FROM questions WHERE imported = 0").get() as { n: number }
-  ).n;
-  if (localQuestions > 0) {
-    const name = `questions-${config.installId}.json`;
-    const body = JSON.stringify(exportQuestions(undefined, { localOnly: true }), null, 2);
+  // One file per question, so adding one costs one small upload rather than
+  // republishing every image.
+  const hashes = JSON.parse(setting("sync_hash_q") ?? "{}") as Record<string, string>;
+  const localQuestions = db
+    .prepare("SELECT id, uid FROM questions WHERE imported = 0 ORDER BY id")
+    .all() as { id: number; uid: string }[];
+
+  for (const question of localQuestions) {
+    const body = JSON.stringify(exportQuestions([question.id]), null, 2);
     const hash = fingerprint(body);
-    if (setting("sync_hash_questions") !== hash) {
-      await remote.put(name, body);
-      putSetting("sync_hash_questions", hash);
-      pushed.push(name);
-    }
+    if (hashes[question.uid] === hash) continue;
+    const name = `${QUESTION_PREFIX}${question.uid}.json`;
+    await remote.put(name, body);
+    hashes[question.uid] = hash;
+    pushed.push(name);
+  }
+
+  // A question deleted here leaves its file behind; blank it so it stops
+  // costing storage. (Imports only ever add, so this doesn't delete anyone's
+  // copy of the question — it never did.)
+  const liveUids = new Set(localQuestions.map((q) => q.uid));
+  for (const uid of Object.keys(hashes)) {
+    if (liveUids.has(uid)) continue;
+    const name = `${QUESTION_PREFIX}${uid}.json`;
+    await remote.put(
+      name,
+      JSON.stringify({
+        format: "traffic-bench",
+        version: BUNDLE_VERSION,
+        kind: "questions",
+        exported_at: new Date().toISOString(),
+        questions: [],
+      }),
+    );
+    delete hashes[uid];
+    pushed.push(name);
+  }
+  putSetting("sync_hash_q", JSON.stringify(hashes));
+
+  // Retire our own pre-split aggregate once every question has its own file.
+  if (localQuestions.length > 0 && setting("sync_legacy_retired") !== "1") {
+    await remote.put(
+      `questions-${config.installId}.json`,
+      JSON.stringify({
+        format: "traffic-bench",
+        version: BUNDLE_VERSION,
+        kind: "questions",
+        exported_at: new Date().toISOString(),
+        questions: [],
+      }),
+    );
+    putSetting("sync_legacy_retired", "1");
+    pushed.push(`questions-${config.installId}.json`);
   }
 
   const localAnswers = (

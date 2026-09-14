@@ -165,18 +165,23 @@ for a one-off, or for taking a snapshot elsewhere.
 
 ### How sync works
 
-Each copy writes two files named after its own install id, and never touches anyone else's:
+Questions go one per file, keyed by the question's own id; answers stay in a single per-install
+file, since they carry no images and are tiny:
 
 ```
-questions-<id>.json    questions that copy created, with images embedded
+q/<question-id>.json   one question, image embedded
 answers-<id>.json      that copy's answers and its grounder comments
 ```
 
-Imports are keyed by a stable per-question id and are idempotent, so both sides converge
-whatever order things arrive in, and importing the same bundle twice changes nothing. Rows that
-arrive from elsewhere are flagged and never re-published, so the bucket doesn't fill with copies
-of copies. Bundles are only rewritten when their content actually changes, so two idle installs
-generate no traffic.
+Splitting questions matters more than it looks. With everything in one bundle, adding a
+question rewrote a file carrying every image ever added — so the upload grew with the
+collection, and a free Supabase project would have hit its ~50 MB per-file ceiling at roughly
+25 questions. One file per question keeps each upload the size of that question.
+
+Imports are keyed by that id and are idempotent, so both sides converge whatever order things
+arrive in, and importing the same file twice changes nothing. Rows that arrive from elsewhere
+are flagged and never re-published, so the bucket doesn't fill with copies of copies. Files are
+only rewritten when their content actually changes, so two idle installs generate no traffic.
 
 Pushes happen the moment a question, answer, or comment is saved; each copy also pulls every 30
 seconds while a tab is open. It's eventual, not instant.
@@ -257,6 +262,8 @@ answer or its grade. For manual models you paste the reply in alongside your que
   answer per model.
 - Schema changes migrate on startup, so after pulling an update **restart the dev server** — hot
   reload keeps the old database connection and you'll see "no such column" until you do.
+- Free Supabase projects pause after about a week of inactivity; sync fails until someone
+  unpauses the project from the dashboard.
 
 ## Licence
 
