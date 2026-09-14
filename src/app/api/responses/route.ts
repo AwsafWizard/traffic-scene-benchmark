@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import { autoGrade } from "@/lib/scoring";
 import type { Question } from "@/lib/types";
 import { syncInBackground } from "@/lib/sync";
+import { isGrounder } from "@/lib/session";
 
 export async function POST(request: Request) {
   const body = (await request.json()) as {
@@ -56,8 +57,12 @@ export async function POST(request: Request) {
 
   await syncInBackground();
 
+  // Answering someone else's question keeps you in the blind flow; answering
+  // your own can go straight to the comparison, since you wrote the answer key.
+  const stayBlind = (await isGrounder()) || Boolean(question.imported);
+
   return NextResponse.json(
-    { id: info.lastInsertRowid, next_question_id: next?.id ?? null },
+    { id: info.lastInsertRowid, next_question_id: next?.id ?? null, stay_blind: stayBlind },
     { status: 201 },
   );
 }

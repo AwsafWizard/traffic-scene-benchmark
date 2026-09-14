@@ -7,13 +7,17 @@ import type { Role } from "@/lib/types";
 const OPTIONS: { value: Role; label: string; hint: string }[] = [
   {
     value: "benchmarker",
-    label: "Setter",
-    hint: "Writes the questions, runs the models, grades the answers.",
+    label: "Both — set questions and answer them",
+    hint:
+      "The normal choice. You get the full app, and questions your partner wrote stay blind " +
+      "until you've answered them. Nothing to switch as you go.",
   },
   {
     value: "grounder",
-    label: "Grounder",
-    hint: "Answers questions blind. Reference answers, model answers and results stay hidden.",
+    label: "Answer only",
+    hint:
+      "Locks this copy to the grounding queue for good — no reference answers, model answers " +
+      "or results, even for questions written here. For a dedicated grounder's machine.",
   },
 ];
 

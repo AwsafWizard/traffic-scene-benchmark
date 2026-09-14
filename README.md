@@ -54,6 +54,20 @@ npm run models
 This prints the exact model strings each of your keys can see. Paste one into the **Model ID**
 field on the Models page. The model must support image input.
 
+## Being both setter and grounder
+
+You don't switch modes. Whether you're grounding is decided per question, from who wrote it:
+
+- **A question you wrote** — you already know the answer, so nothing is hidden. Comments on it
+  are private working notes and stay on your machine.
+- **A question your partner wrote** — you can still answer it cold, so the reference answer,
+  the model answers, and the results stay hidden until you've submitted yours. Comments on it
+  are feedback and travel back to them.
+
+So two people can both write questions and ground each other's, with nothing to remember. The
+**Answer only** setting on the Transfer page exists for a dedicated grounder's machine, which
+should never see answers even for questions written there.
+
 ## Comments
 
 Both sides can leave notes on a question. The grounder can flag that an image is too small or

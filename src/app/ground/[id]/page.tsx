@@ -7,9 +7,10 @@ import GroundForm from "./GroundForm";
 
 export const dynamic = "force-dynamic";
 
-export default async function GroundPage({ params }: PageProps<"/ground/[id]">) {
+export default async function GroundPage({ params, searchParams }: PageProps<"/ground/[id]">) {
   const { id } = await params;
   const role = await getRole();
+  const blind = "blind" in (await searchParams);
   const question = getDb().prepare("SELECT * FROM questions WHERE id = ?").get(id) as
     | Question
     | undefined;
@@ -29,6 +30,12 @@ export default async function GroundPage({ params }: PageProps<"/ground/[id]">) 
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
+      {blind && (
+        <p className="lg:col-span-2 rounded-xl border border-accent/30 bg-accent/10 p-4 text-sm text-accent">
+          Your partner wrote this one, so you can still answer it cold. The answers stay hidden
+          until you&apos;ve had your go.
+        </p>
+      )}
       <div className="lg:sticky lg:top-8 lg:self-start">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img

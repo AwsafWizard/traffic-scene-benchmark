@@ -15,12 +15,16 @@ export async function POST(request: Request) {
   if (!text) return NextResponse.json({ error: "Write something first" }, { status: 400 });
 
   const db = getDb();
-  const question = db.prepare("SELECT id FROM questions WHERE id = ?").get(body.question_id) as
-    | { id: number }
-    | undefined;
+  const question = db
+    .prepare("SELECT id, imported FROM questions WHERE id = ?")
+    .get(body.question_id) as { id: number; imported: number } | undefined;
   if (!question) return NextResponse.json({ error: "Unknown question" }, { status: 404 });
 
-  const role = await getRole();
+  // A note on someone else's question is feedback for them and travels back.
+  // A note on your own is a private working note and stays here. Deriving this
+  // from the question means nobody has to remember to flip a mode first.
+  const role =
+    (await getRole()) === "grounder" || question.imported ? "grounder" : "benchmarker";
   const info = db
     .prepare(
       `INSERT INTO comments (uid, question_id, author_role, author_name, body)

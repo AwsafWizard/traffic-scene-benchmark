@@ -36,8 +36,9 @@ export default async function TransferPage() {
         <div>
           <h2 className="text-sm font-semibold">What this copy is for</h2>
           <p className="mt-1 text-sm text-muted">
-            Set this once per machine. It decides what the app shows you, and whether your
-            comments travel to the other side as grounder feedback or stay here as private notes.
+            Most people want the first one and never touch this again. Whether a comment is
+            feedback for your partner or a private note is worked out per question — notes on
+            their questions travel back, notes on your own stay here.
           </p>
         </div>
         <RolePicker role={installRole} />

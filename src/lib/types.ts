@@ -18,11 +18,15 @@ export interface Question {
   options: string | null;
   reference_answer: string | null;
   notes: string | null;
+  /** 1 when this question arrived from another install. */
+  imported: number;
   created_at: string;
 }
 
 export interface HumanResponse {
   id: number;
+  /** 1 when this answer arrived from another install. */
+  imported: number;
   question_id: number;
   grounder_name: string;
   answer: string;

@@ -59,6 +59,7 @@ export default function GroundForm({
     const body = (await response.json()) as {
       error?: string;
       next_question_id?: number | null;
+      stay_blind?: boolean;
     };
 
     if (!response.ok) {
@@ -67,8 +68,8 @@ export default function GroundForm({
       return;
     }
 
-    // Grounders must never pass through Compare — it shows the reference answer.
-    if (isGrounder) {
+    // Anyone answering blind must not pass through Compare — it shows the answer.
+    if (isGrounder || body.stay_blind) {
       router.push(body.next_question_id ? `/ground/${body.next_question_id}` : "/ground?done=1");
     } else {
       router.push(`/reveal/${question.id}`);

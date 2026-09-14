@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
 import type { Comment, Grade, HumanResponse, LlmRun, Question, RunTurn } from "@/lib/types";
 import CommentThread from "../../CommentThread";
@@ -30,6 +30,12 @@ export default async function RevealPage({ params }: PageProps<"/reveal/[id]">) 
   const humans = db
     .prepare("SELECT * FROM human_responses WHERE question_id = ? ORDER BY id")
     .all(id) as HumanResponse[];
+
+  // You can still be a naive subject for a question you didn't write, so don't
+  // show the answers until you've had your go. Questions you wrote yourself are
+  // exempt — you already know the answer.
+  const locallyAnswered = humans.some((h) => !h.imported);
+  if (question.imported && !locallyAnswered) redirect(`/ground/${question.id}?blind=1`);
 
   const runs = db
     .prepare(

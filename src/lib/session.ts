@@ -23,12 +23,23 @@ export async function getRole(): Promise<Role> {
   return getInstallRole();
 }
 
-/** What this copy of the app is used for, when a browser hasn't said otherwise. */
-export function getInstallRole(): Role {
+/**
+ * How this copy is used. "both" is the normal case: you write some questions
+ * and ground the ones your partner wrote, and the app works that out per
+ * question rather than making you flip a switch. "grounder" is for a machine
+ * that should never see answers at all.
+ */
+export type InstallMode = "both" | "grounder";
+
+export function getInstallMode(): InstallMode {
   const row = getDb().prepare("SELECT value FROM settings WHERE key = 'install_role'").get() as
     | { value: string }
     | undefined;
-  return row?.value === "grounder" ? "grounder" : "benchmarker";
+  return row?.value === "grounder" ? "grounder" : "both";
+}
+
+export function getInstallRole(): Role {
+  return getInstallMode() === "grounder" ? "grounder" : "benchmarker";
 }
 
 export function setInstallRole(role: Role): void {
