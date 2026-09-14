@@ -62,7 +62,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           </nav>
         </header>
         <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">{children}</main>
-        {sync.enabled && <SyncPoller />}
+        {sync.mode !== "off" && <SyncPoller />}
       </body>
     </html>
   );

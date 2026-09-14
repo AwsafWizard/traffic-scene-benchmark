@@ -3,33 +3,33 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { errorMessage } from "@/lib/fetch-error";
-import type { SyncConfig, SyncResult } from "@/lib/sync";
+import type { SyncConfig, SyncMode, SyncResult } from "@/lib/sync";
 
 const field =
   "w-full rounded-md border border-line bg-background px-3 py-2 text-sm outline-none focus:border-accent";
 
 export function SyncSettings({ config }: { config: SyncConfig }) {
   const router = useRouter();
+  const [mode, setMode] = useState<SyncMode>(config.mode);
   const [dir, setDir] = useState(config.dir ?? "");
-  const [enabled, setEnabled] = useState(config.enabled);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SyncResult | null>(null);
 
-  async function save(nextEnabled: boolean) {
+  async function save(nextMode: SyncMode) {
     setBusy(true);
     setError(null);
     const response = await fetch("/api/sync", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dir, enabled: nextEnabled }),
+      body: JSON.stringify({ mode: nextMode, dir }),
     });
     setBusy(false);
     if (!response.ok) {
       setError(await errorMessage(response, "Could not save"));
       return;
     }
-    setEnabled(nextEnabled);
+    setMode(nextMode);
     router.refresh();
   }
 
@@ -47,48 +47,72 @@ export function SyncSettings({ config }: { config: SyncConfig }) {
     router.refresh();
   }
 
+  const options: { value: SyncMode; label: string; hint: string }[] = [
+    { value: "off", label: "Off", hint: "Pass bundle files by hand." },
+    {
+      value: "supabase",
+      label: "Cloud (Supabase)",
+      hint: config.supabaseConfigured
+        ? `Bucket "${config.supabaseBucket}". Works even when the other machine is asleep.`
+        : "Needs SUPABASE_URL and SUPABASE_ANON_KEY in .env.local.",
+    },
+    {
+      value: "folder",
+      label: "Shared folder",
+      hint: "A folder Drive for Desktop, Dropbox or Syncthing keeps in step.",
+    },
+  ];
+
   return (
     <div className="space-y-4">
-      <label className="block text-sm">
-        <span className="mb-1.5 block font-medium">Shared folder</span>
-        <input
-          value={dir}
-          onChange={(e) => setDir(e.target.value)}
-          placeholder="/home/you/My Drive/traffic-bench"
-          className={`${field} font-mono`}
-        />
-        <span className="mt-1 block text-xs text-muted">
-          A folder that Google Drive for Desktop, Dropbox, or Syncthing keeps in step. Both of you
-          point at your own local copy of the same shared folder.
-        </span>
-      </label>
+      <div className="space-y-2">
+        {options.map((option) => (
+          <label
+            key={option.value}
+            className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition ${
+              mode === option.value ? "border-accent bg-accent/5" : "border-line hover:bg-background"
+            }`}
+          >
+            <input
+              type="radio"
+              name="sync-mode"
+              checked={mode === option.value}
+              onChange={() => save(option.value)}
+              disabled={busy || (option.value === "supabase" && !config.supabaseConfigured)}
+              className="mt-0.5 size-4 accent-[var(--accent)]"
+            />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium">{option.label}</span>
+              <span className="block text-xs text-muted">{option.hint}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+
+      {mode === "folder" && (
+        <label className="block text-sm">
+          <span className="mb-1.5 block font-medium">Folder path</span>
+          <input
+            value={dir}
+            onChange={(e) => setDir(e.target.value)}
+            onBlur={() => save("folder")}
+            placeholder="/home/you/My Drive/traffic-bench"
+            className={`${field} font-mono`}
+          />
+        </label>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => save(!enabled)}
-          disabled={busy}
-          className={`rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50 ${
-            enabled
-              ? "border border-line hover:bg-background"
-              : "bg-accent text-white"
-          }`}
-        >
-          {enabled ? "Turn sync off" : "Turn sync on"}
-        </button>
-        {enabled && (
+        {mode !== "off" && (
           <button
             onClick={runSync}
             disabled={busy}
-            className="rounded-md border border-line px-4 py-2 text-sm transition hover:bg-background disabled:opacity-50"
+            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
             {busy ? "Syncing…" : "Sync now"}
           </button>
         )}
-        {enabled && (
-          <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-600">
-            on · this copy is {config.installId}
-          </span>
-        )}
+        <span className="text-xs text-muted">this copy is {config.installId}</span>
       </div>
 
       {config.lastSync && (
@@ -140,15 +164,14 @@ export function SyncPoller({ intervalMs = 30000 }: { intervalMs?: number }) {
         const response = await fetch("/api/sync", { method: "POST" });
         if (!response.ok || cancelled) return;
         const result = (await response.json()) as SyncResult;
-        const total =
-          result.pulled.questions + result.pulled.answers + result.pulled.comments;
+        const total = result.pulled.questions + result.pulled.answers + result.pulled.comments;
         if (total > 0) {
           setPulled(total);
           router.refresh();
           setTimeout(() => setPulled(0), 4000);
         }
       } catch {
-        // Offline or the folder vanished; the next tick can try again.
+        // Offline or the remote is unreachable; the next tick can try again.
       }
     }
 

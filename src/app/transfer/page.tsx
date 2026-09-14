@@ -31,11 +31,11 @@ export default async function TransferPage() {
 
       <section className="space-y-4 rounded-xl border border-line bg-surface p-5">
         <div>
-          <h2 className="text-sm font-semibold">Automatic folder sync</h2>
+          <h2 className="text-sm font-semibold">Automatic sync</h2>
           <p className="mt-1 text-sm text-muted">
-            Point both copies at the same shared folder and they keep each other up to date —
-            no files to pass by hand. The app only reads and writes local files; Drive, Dropbox
-            or Syncthing does the moving, so there is nothing to sign in to.
+            Both copies trade work through one shared place, so there are no files to pass by
+            hand. Cloud sync needs nothing installed and keeps working while the other machine
+            is asleep.
           </p>
         </div>
         <SyncSettings config={sync} />
@@ -48,7 +48,7 @@ export default async function TransferPage() {
             {isGrounder
               ? "Send your answers back to the benchmarker."
               : "Send the question set to your grounder, or take your own answers elsewhere."}
-            {sync.enabled && " Sync already handles this — these are for one-off transfers."}
+            {sync.mode !== "off" && " Sync already handles this — these are for one-off transfers."}
           </p>
         </div>
 

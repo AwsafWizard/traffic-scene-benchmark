@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     )
     .get() as { id: number } | undefined;
 
-  syncInBackground();
+  await syncInBackground();
 
   return NextResponse.json(
     { id: info.lastInsertRowid, next_question_id: next?.id ?? null },

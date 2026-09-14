@@ -132,22 +132,45 @@ Two things to know: it's eventual, not instant — updates land when the sync cl
 to it — and your reference answers and private setter notes are never written to the shared
 folder, only questions, answers, and grounder comments.
 
-### Setting up the shared folder
+### Cloud sync (recommended)
 
-You paste a **local folder path** into the app, never a Drive link. Something else has to mirror
-that folder to the cloud.
+Keeps working when the other machine is off, and needs nothing installed beyond the app.
 
-**Windows / macOS** — install [Google Drive for Desktop](https://www.google.com/drive/download/),
-make a folder in your Drive (say `traffic-bench`), and paste the local path it appears at:
+One of you creates a free [Supabase](https://supabase.com) project — no card required — then:
 
-```
-Windows   G:\My Drive\traffic-bench
-macOS     ~/Library/CloudStorage/GoogleDrive-you@gmail.com/My Drive/traffic-bench
-```
+1. **Storage → New bucket**, name it `traffic-bench`.
+2. **SQL Editor**, run this so both copies can read and write that bucket:
 
-**Linux** — Google publishes no Drive client. Connecting Drive through GNOME Online Accounts
-does *not* work either: that mount lists files by opaque ID rather than name, so the app can't
-find the bundles. Use [rclone](https://rclone.org) instead, which `scripts/drive-sync.sh`
+   ```sql
+   create policy "bench read"   on storage.objects for select
+     using (bucket_id = 'traffic-bench');
+   create policy "bench insert" on storage.objects for insert
+     with check (bucket_id = 'traffic-bench');
+   create policy "bench update" on storage.objects for update
+     using (bucket_id = 'traffic-bench');
+   ```
+
+3. **Project Settings → API**, copy the Project URL and the `anon` public key into `.env.local`
+   on **both** machines:
+
+   ```
+   SUPABASE_URL=https://xxxxxxxx.supabase.co
+   SUPABASE_ANON_KEY=eyJhbGciOi...
+   ```
+
+4. Restart the dev server, then pick **Cloud (Supabase)** on the Transfer page.
+
+That's the whole setup — the same two strings on both sides. Anyone holding them can read and
+write that bucket, so treat the anon key as a shared password and keep the bucket private.
+
+### Shared folder instead
+
+If you'd rather keep data off a third-party service, point both copies at a folder something
+else mirrors — Dropbox, Syncthing, or Google Drive.
+
+Note that **Google ships no Drive client for Linux**, and connecting Drive through GNOME Online
+Accounts does *not* work: that mount lists files by opaque ID rather than name, so the app
+can't find the bundles. On Linux use [rclone](https://rclone.org), which `scripts/drive-sync.sh`
 wraps:
 
 ```bash
@@ -156,29 +179,8 @@ curl https://rclone.org/install.sh | sudo bash   # once
 ./scripts/drive-sync.sh start                    # sync every 20s in the background
 ```
 
-`setup` prints the local path to paste into the app — by default `~/gdrive/traffic-bench`.
-Override any of `BENCH_REMOTE`, `BENCH_REMOTE_DIR`, `BENCH_LOCAL_DIR`, or
-`BENCH_SYNC_INTERVAL` if you want different names or timing. `status` shows what's running and
-`stop` ends it.
-
-Both people must point at the *same* Drive folder — share it from Drive with your partner's
-Google account, and they'll see it under **Shared with me** (right-click → *Add shortcut to
-Drive* so it appears in their own tree).
-
-**Same network** — the Share page gives them a link that puts their browser into
-grounding mode. Nothing to install; your machine has to stay awake.
-
-**Their own copy** — the Transfer page moves work between two installs as a single
-`.json` file. Images travel inside the file, so there's nothing else to send.
-
-1. You export the questions and send them the file.
-2. They import it into their copy and answer everything.
-3. They export their answers and send that file back.
-4. You import it — answers are matched by a stable question id and scored automatically.
-
-The question bundle deliberately omits reference answers, notes, and model responses, so
-handing it over can't spoil the grounding. Answer bundles carry no images, so they stay small.
-Re-importing the same file is a no-op, so it's safe to do twice.
+On Windows and macOS, Google Drive for Desktop handles it with no extra tooling — paste
+`G:\My Drive\traffic-bench` or the equivalent.
 
 ## Follow-up threads
 

@@ -34,7 +34,7 @@ export async function POST(request: Request) {
       text,
     );
 
-  syncInBackground();
+  await syncInBackground();
   return NextResponse.json({ id: info.lastInsertRowid }, { status: 201 });
 }
 

@@ -66,6 +66,6 @@ export async function POST(request: Request) {
       notes || null,
     );
 
-  syncInBackground();
+  await syncInBackground();
   return NextResponse.json({ id: info.lastInsertRowid }, { status: 201 });
 }

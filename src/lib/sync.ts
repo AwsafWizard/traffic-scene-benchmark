@@ -9,23 +9,34 @@ import {
   parseBundle,
 } from "./bundle";
 import { getDb } from "./db";
+import {
+  RemoteError,
+  folderRemote,
+  supabaseRemote,
+  supabaseSettingsFromEnv,
+  type Remote,
+} from "./remote";
 
 /**
- * Sync through a folder that something else keeps in step across machines —
- * Google Drive for Desktop, Dropbox, Syncthing. The app only ever reads and
- * writes local files, so there is no API to authorise on either machine.
+ * Two installs stay in step by trading bundle files through a shared place —
+ * a Supabase bucket, or a folder something else mirrors across machines.
  *
  * Each install owns two files named after its own id and never writes anyone
- * else's. Because bundle imports are keyed by uid and are idempotent, both
- * sides converge no matter what order the files arrive in.
+ * else's. Because imports are keyed by uid and idempotent, both sides converge
+ * whatever order the files arrive in.
  */
 
+export type SyncMode = "off" | "folder" | "supabase";
+
 export interface SyncConfig {
+  mode: SyncMode;
   dir: string | null;
-  enabled: boolean;
   installId: string;
   lastSync: string | null;
   lastError: string | null;
+  /** Whether SUPABASE_URL / SUPABASE_ANON_KEY are present in the environment. */
+  supabaseConfigured: boolean;
+  supabaseBucket: string | null;
 }
 
 function setting(key: string): string | null {
@@ -53,108 +64,105 @@ export function getInstallId(): string {
 }
 
 export function getSyncConfig(): SyncConfig {
+  const supabase = supabaseSettingsFromEnv();
+  const stored = setting("sync_mode");
+  // Older installs stored a boolean for folder sync.
+  const mode: SyncMode =
+    stored === "folder" || stored === "supabase"
+      ? stored
+      : setting("sync_enabled") === "1"
+        ? "folder"
+        : "off";
+
   return {
+    mode,
     dir: setting("sync_dir"),
-    enabled: setting("sync_enabled") === "1",
     installId: getInstallId(),
     lastSync: setting("sync_last"),
-    lastError: setting("sync_error"),
+    lastError: setting("sync_error") || null,
+    supabaseConfigured: supabase !== null,
+    supabaseBucket: supabase?.bucket ?? null,
   };
 }
 
 export class SyncError extends Error {}
 
-export function setSyncConfig(dir: string | null, enabled: boolean): SyncConfig {
-  if (enabled) {
+export function setSyncConfig(mode: SyncMode, dir: string | null): SyncConfig {
+  if (mode === "folder") {
     if (!dir?.trim()) throw new SyncError("Choose a folder first.");
     const resolved = path.resolve(dir.trim());
-    if (!fs.existsSync(resolved)) {
-      throw new SyncError(`That folder doesn't exist: ${resolved}`);
-    }
+    if (!fs.existsSync(resolved)) throw new SyncError(`That folder doesn't exist: ${resolved}`);
     if (!fs.statSync(resolved).isDirectory()) {
       throw new SyncError("That path is a file, not a folder.");
     }
-    try {
-      fs.accessSync(resolved, fs.constants.W_OK);
-    } catch {
-      throw new SyncError("That folder isn't writable.");
-    }
     putSetting("sync_dir", resolved);
-  } else if (dir?.trim()) {
-    putSetting("sync_dir", path.resolve(dir.trim()));
   }
 
-  putSetting("sync_enabled", enabled ? "1" : "0");
+  if (mode === "supabase" && !supabaseSettingsFromEnv()) {
+    throw new SyncError(
+      "SUPABASE_URL and SUPABASE_ANON_KEY aren't set. Add them to .env.local and restart the dev server.",
+    );
+  }
+
+  putSetting("sync_mode", mode);
+  putSetting("sync_enabled", mode === "folder" ? "1" : "0");
   putSetting("sync_error", "");
   return getSyncConfig();
+}
+
+function remoteFor(config: SyncConfig): Remote {
+  if (config.mode === "supabase") {
+    const settings = supabaseSettingsFromEnv();
+    if (!settings) throw new SyncError("Supabase isn't configured.");
+    return supabaseRemote(settings);
+  }
+  if (!config.dir) throw new SyncError("No sync folder set.");
+  return folderRemote(config.dir);
 }
 
 export interface SyncResult {
   pulled: { questions: number; answers: number; comments: number };
   pushed: string[];
   filesSeen: number;
+  where: string;
 }
 
-/**
- * Writes a file only when the payload actually changed.
- *
- * `exported_at` moves on every export, so a naive comparison would rewrite the
- * questions bundle — images and all — on every tick, and Drive would re-upload
- * megabytes every time. Comparing everything *except* that timestamp keeps an
- * idle pair of installs completely quiet.
- */
-function writeIfChanged(file: string, contents: string): boolean {
-  const withoutTimestamp = (text: string) => {
-    const parsed = JSON.parse(text) as Record<string, unknown>;
-    delete parsed.exported_at;
-    return JSON.stringify(parsed);
-  };
-
-  try {
-    if (
-      fs.existsSync(file) &&
-      withoutTimestamp(fs.readFileSync(file, "utf8")) === withoutTimestamp(contents)
-    ) {
-      return false;
-    }
-  } catch {
-    // Unreadable or unparseable means we should just rewrite it.
-  }
-  fs.writeFileSync(file, contents);
-  return true;
+/** Payload identity, ignoring the timestamp that moves on every export. */
+function fingerprint(json: string): string {
+  const parsed = JSON.parse(json) as Record<string, unknown>;
+  delete parsed.exported_at;
+  return crypto.createHash("sha256").update(JSON.stringify(parsed)).digest("hex");
 }
 
-export function syncNow(): SyncResult {
+export async function syncNow(): Promise<SyncResult> {
   const config = getSyncConfig();
-  if (!config.enabled || !config.dir) {
-    throw new SyncError("Folder sync is turned off.");
-  }
-  if (!fs.existsSync(config.dir)) {
-    throw new SyncError(
-      `The sync folder has gone missing: ${config.dir}. If it's a Drive folder, check Drive for Desktop is running.`,
-    );
-  }
+  if (config.mode === "off") throw new SyncError("Sync is turned off.");
 
+  const remote = remoteFor(config);
   const pulled = { questions: 0, answers: 0, comments: 0 };
   let filesSeen = 0;
 
-  // Pull first, so anything we then push already reflects what arrived.
   const mine = new Set([
     `questions-${config.installId}.json`,
     `answers-${config.installId}.json`,
   ]);
 
-  for (const name of fs.readdirSync(config.dir)) {
-    if (!name.endsWith(".json") || mine.has(name)) continue;
-    if (!name.startsWith("questions-") && !name.startsWith("answers-")) continue;
+  // Remember each remote file's version so an unchanged one is never
+  // re-downloaded — the questions bundle carries every image.
+  const seen = JSON.parse(setting("sync_seen") ?? "{}") as Record<string, string>;
+
+  for (const file of await remote.list()) {
+    if (!file.name.endsWith(".json") || mine.has(file.name)) continue;
+    if (!file.name.startsWith("questions-") && !file.name.startsWith("answers-")) continue;
 
     filesSeen += 1;
-    const full = path.join(config.dir, name);
+    if (seen[file.name] === file.version) continue;
+
     let bundle;
     try {
-      bundle = parseBundle(fs.readFileSync(full, "utf8"));
+      bundle = parseBundle(await remote.get(file.name));
     } catch {
-      // A partially-synced or foreign file shouldn't stop the whole run.
+      // Half-written or foreign file; try again on the next pass.
       continue;
     }
 
@@ -165,8 +173,12 @@ export function syncNow(): SyncResult {
       pulled.answers += result.added;
       pulled.comments += result.comments ?? 0;
     }
+    seen[file.name] = file.version;
   }
+  putSetting("sync_seen", JSON.stringify(seen));
 
+  // Push ours, but only when the payload actually changed. Comparing against a
+  // stored hash avoids downloading our own bundle just to diff it.
   const pushed: string[] = [];
   const db = getDb();
 
@@ -174,49 +186,62 @@ export function syncNow(): SyncResult {
     db.prepare("SELECT COUNT(*) AS n FROM questions WHERE imported = 0").get() as { n: number }
   ).n;
   if (localQuestions > 0) {
-    const file = path.join(config.dir, `questions-${config.installId}.json`);
+    const name = `questions-${config.installId}.json`;
     const body = JSON.stringify(exportQuestions(undefined, { localOnly: true }), null, 2);
-    if (writeIfChanged(file, body)) pushed.push(path.basename(file));
+    const hash = fingerprint(body);
+    if (setting("sync_hash_questions") !== hash) {
+      await remote.put(name, body);
+      putSetting("sync_hash_questions", hash);
+      pushed.push(name);
+    }
   }
 
-  const answers = (
+  const localAnswers = (
     db.prepare("SELECT COUNT(*) AS n FROM human_responses WHERE imported = 0").get() as {
       n: number;
     }
   ).n;
-  const grounderComments = (
-    db.prepare(
-      "SELECT COUNT(*) AS n FROM comments WHERE author_role = 'grounder' AND imported = 0",
-    ).get() as {
-      n: number;
-    }
+  const localComments = (
+    db
+      .prepare("SELECT COUNT(*) AS n FROM comments WHERE author_role = 'grounder' AND imported = 0")
+      .get() as { n: number }
   ).n;
-  if (answers > 0 || grounderComments > 0) {
-    const file = path.join(config.dir, `answers-${config.installId}.json`);
+  if (localAnswers > 0 || localComments > 0) {
+    const name = `answers-${config.installId}.json`;
     const body = JSON.stringify(
       exportResponses({ includeSetterComments: false, localOnly: true }),
       null,
       2,
     );
-    if (writeIfChanged(file, body)) pushed.push(path.basename(file));
+    const hash = fingerprint(body);
+    if (setting("sync_hash_answers") !== hash) {
+      await remote.put(name, body);
+      putSetting("sync_hash_answers", hash);
+      pushed.push(name);
+    }
   }
 
   putSetting("sync_last", new Date().toISOString());
   putSetting("sync_error", "");
 
-  return { pulled, pushed, filesSeen };
+  return { pulled, pushed, filesSeen, where: remote.label };
 }
 
 /**
- * Fire-and-forget sync for use inside mutations. A sync failure must never
- * cost someone the answer they just submitted, so it is recorded and swallowed.
+ * Fire-and-forget sync for use inside mutations. A sync failure must never cost
+ * someone the answer they just submitted, so it is recorded and swallowed.
  */
-export function syncInBackground(): void {
-  const config = getSyncConfig();
-  if (!config.enabled || !config.dir) return;
+export async function syncInBackground(): Promise<void> {
+  if (getSyncConfig().mode === "off") return;
   try {
-    syncNow();
+    await syncNow();
   } catch (error) {
-    putSetting("sync_error", error instanceof Error ? error.message : String(error));
+    const message =
+      error instanceof RemoteError || error instanceof SyncError
+        ? error.message
+        : error instanceof Error
+          ? error.message
+          : String(error);
+    putSetting("sync_error", message);
   }
 }
