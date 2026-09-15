@@ -50,7 +50,7 @@ Nothing else is needed to work alone. To work with someone else, see
    which grounding probes apply, and how it's scored. Every default stays editable.
 2. **Ground** — the human sees only the image and the question. Never the reference answer,
    never the model answers. They give an answer, a confidence rating, and optionally their
-   reasoning.
+   reasoning. Once they submit, the same Compare page opens for them as for you.
 3. **Compare** — once they've answered, everything is revealed. Paste in what each model said,
    then grade it correct / partial / incorrect. Formats with a reproducible check score
    themselves; the rest you grade.
@@ -183,6 +183,38 @@ curl https://rclone.org/install.sh | sudo bash   # once
 On Windows and macOS, Google Drive for Desktop handles it with no extra tooling — point the app
 at `G:\My Drive\traffic-bench` or the equivalent.
 
+### A second copy, for testing sync
+
+Rather than asking your partner whether a change landed, run a second copy here and watch both
+sides yourself. It's the same app out of the same checkout — nothing is cut down or put in a
+special mode — with its own database, its own images and its own install id, so the two behave
+as two machines:
+
+```bash
+npm run dev:partner
+```
+
+That serves the second copy on <http://localhost:3001>, keeping its data in `data-partner/`
+(both it and its build directory are gitignored). Your own copy on port 3000 is untouched.
+Open them side by side and you can add a question in one, watch it arrive in the other, answer
+it there, and see the answer come back.
+
+It starts with sync **off** — set a mode on its Transfer page, the same way your partner set
+theirs. Which target to point it at:
+
+- **Same bucket as your partner** — the honest end-to-end test of your real setup, but
+  everything you do in the second copy is real work arriving on their side. Good for a
+  deliberate round trip, not for poking around.
+- **A sandbox bucket** — `SUPABASE_BUCKET=traffic-bench-test npm run dev:partner` exercises the
+  same cloud path with nothing shared. The usual choice.
+- **Folder mode** — point both copies at one scratch directory to test the whole loop offline.
+
+Each copy publishes only what it creates itself: rows that arrived from elsewhere are flagged
+as imported and never republished, so the second copy can't echo your questions back at you.
+
+To start it over, stop it and delete `data-partner/`. The next run rebuilds it empty with a
+fresh install id.
+
 ### Passing files by hand
 
 The Transfer page exports and imports bundles directly, with no sync configured at all. Useful
@@ -204,9 +236,25 @@ collection, and a free Supabase project would have hit its ~50 MB per-file ceili
 25 questions. One file per question keeps each upload the size of that question.
 
 Imports are keyed by that id and are idempotent, so both sides converge whatever order things
-arrive in, and importing the same file twice changes nothing. Rows that arrive from elsewhere
-are flagged and never re-published, so the bucket doesn't fill with copies of copies. Files are
-only rewritten when their content actually changes, so two idle installs generate no traffic.
+arrive in, and importing the same file twice changes nothing. Each copy publishes everything it
+holds, not only what it typed itself — an answer that reached you as a hand-imported bundle, or
+a grade you gave your partner's answer, would otherwise live on one machine and nowhere else.
+Because a question's file is keyed by its own id, re-publishing rewrites that one file instead
+of adding a copy of it. Files are only rewritten when their content actually changes, so two
+idle installs generate no traffic.
+
+**Edits travel, not just new rows.** Classifying a question your partner wrote reaches them;
+so does a corrected prompt. Each question carries the time it was last edited, and a copy
+receiving one reconciles it field by field:
+
+- A filled-in value beats an empty one, whichever side is newer. Your classification can't be
+  blanked out by a copy that simply never had one.
+- When both sides have a value and they differ, the more recent edit wins.
+- Edits made in the same second are settled by comparing the content itself, so both machines
+  reach the same answer rather than each keeping its own.
+
+A grade is treated as the grader's own: an incoming one fills a gap, and never overwrites a
+verdict you gave yourself. If the two of you disagree, you each keep your own.
 
 Pushes happen the moment a question, answer, or comment is saved; each copy also pulls every 30
 seconds while a tab is open. It's eventual, not instant.
@@ -216,14 +264,21 @@ the other side are added **disabled** — nothing is ever called without your ow
 keys are never in the bundle since each install reads its own from `.env.local`.
 
 Model answers travel too, including ones pasted by hand, their follow-up threads, and the grade
-you gave them — so both of you see the same Results. A model the other side used but you
+you gave them — so do the grades on human answers, so both of you see the same Statistics. A model the other side used but you
 haven't configured is registered here as a disabled entry, so its answers are labelled properly
 and it is never called. If a copy's remote file goes missing or is emptied, the next sync
 notices and republishes it.
 
-**Your reference answers and private notes are never uploaded** — only questions, answers,
-model answers, and grounder comments. Handing someone the bucket can't spoil their grounding:
-a question you haven't answered keeps its answers hidden locally regardless of what synced.
+The first sync after upgrading to edit-aware sync re-publishes every question this copy holds,
+once, so the bucket carries each side's current version rather than only the rows it first
+wrote. Expect one slow sync per install; after that the hash check keeps it quiet again.
+
+**The answer key travels; your private notes don't.** Both copies hold the same reference
+answer, so whoever grounded a question sees what it was meant to be once they have answered,
+and each copy can score the checkable formats for itself rather than waiting for the other to
+grade. What protects grounding is not the key being absent — it's that Compare refuses to open
+a question this copy hasn't answered yet, and sends you to answer it first. The setter's
+working notes are still never uploaded.
 
 ---
 
