@@ -15,6 +15,7 @@
 
 # next.js
 /.next/
+/.next-partner/
 /out/
 
 # production
@@ -42,6 +43,8 @@ next-env.d.ts
 
 # local data (sqlite db + uploaded images)
 /data
+# the second copy used to test the partner side (npm run dev:partner)
+/data-partner
 .env
 .env.local
 
