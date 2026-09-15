@@ -8,9 +8,11 @@ import type { AnswerType, Category, Question, Verdict } from "./types";
 export const BUNDLE_VERSION = 1;
 
 /**
- * A question as it travels to another install. Deliberately carries no
- * reference answer and no notes: the grounder must answer blind, and an
- * exported bundle is the easiest way to leak the answer key by accident.
+ * A question as it travels to another install. It carries the setter's answer
+ * key, so both copies can reveal the same thing and score the same way — what
+ * keeps grounding honest is the Compare page refusing to open a question you
+ * haven't answered yet, not the key being absent from the bundle. The setter's
+ * private working notes still stay home.
  */
 export interface BundleQuestion {
   uid: string;
@@ -25,6 +27,14 @@ export interface BundleQuestion {
   modality?: string | null;
   probes?: string[] | null;
   answer_format?: string | null;
+  /**
+   * The setter's answer key. It travels so the other copy can reveal it once
+   * they have answered, and can score checkable formats for itself. The Compare
+   * page is gated on having answered, so arriving here can't spoil grounding.
+   */
+  reference_answer?: string | null;
+  /** When the shared fields were last edited. Absent on pre-taxonomy bundles. */
+  updated_at?: string | null;
 }
 
 export interface BundleResponse {
@@ -35,6 +45,8 @@ export interface BundleResponse {
   rationale: string | null;
   duration_ms: number | null;
   created_at: string;
+  /** The grade this answer was given, so both copies show the same one. */
+  verdict?: string | null;
 }
 
 export interface QuestionBundle {
@@ -116,19 +128,14 @@ const EXT: Record<string, string> = {
   "image/gif": ".gif",
 };
 
-export function exportQuestions(
-  ids?: number[],
-  { localOnly = false }: { localOnly?: boolean } = {},
-): QuestionBundle {
+export function exportQuestions(ids?: number[]): QuestionBundle {
   const db = getDb();
   const rows = (
     ids?.length
       ? db
           .prepare(`SELECT * FROM questions WHERE id IN (${ids.map(() => "?").join(",")})`)
           .all(...ids)
-      : localOnly
-        ? db.prepare("SELECT * FROM questions WHERE imported = 0 ORDER BY id").all()
-        : db.prepare("SELECT * FROM questions ORDER BY id").all()
+      : db.prepare("SELECT * FROM questions ORDER BY id").all()
   ) as Question[];
 
   const questions: BundleQuestion[] = rows.map((q) => {
@@ -144,6 +151,8 @@ export function exportQuestions(
       modality: q.modality,
       probes: q.probes ? (JSON.parse(q.probes) as string[]) : null,
       answer_format: q.answer_format,
+      reference_answer: q.reference_answer,
+      updated_at: q.updated_at ?? null,
       image: {
         media_type: MEDIA[ext] ?? "image/png",
         data: fs.readFileSync(uploadPath(q.image_path)).toString("base64"),
@@ -160,17 +169,22 @@ export function exportQuestions(
   };
 }
 
+/**
+ * Everything this copy holds, not only what it typed itself. An answer that
+ * reached us by hand-imported bundle, or a grade we gave someone else's answer,
+ * is just as much part of the picture — and imports are keyed and idempotent,
+ * so a row travelling through a third copy lands once and stays put.
+ */
 export function exportResponses({
   includeSetterComments = true,
-  localOnly = false,
-}: { includeSetterComments?: boolean; localOnly?: boolean } = {}): ResponseBundle {
+}: { includeSetterComments?: boolean } = {}): ResponseBundle {
   const rows = getDb()
     .prepare(
       `SELECT q.uid AS question_uid, h.grounder_name, h.answer, h.confidence,
-              h.rationale, h.duration_ms, h.created_at
+              h.rationale, h.duration_ms, h.created_at, g.verdict AS verdict
        FROM human_responses h
        JOIN questions q ON q.id = h.question_id
-       ${localOnly ? "WHERE h.imported = 0" : ""}
+       LEFT JOIN grades g ON g.target_type = 'human' AND g.target_id = h.id
        ORDER BY h.id`,
     )
     .all() as BundleResponse[];
@@ -182,13 +196,7 @@ export function exportResponses({
       `SELECT c.uid, q.uid AS question_uid, c.author_role, c.author_name, c.body, c.created_at
        FROM comments c
        JOIN questions q ON q.id = c.question_id
-       ${[
-         includeSetterComments ? null : "c.author_role = 'grounder'",
-         localOnly ? "c.imported = 0" : null,
-       ]
-         .filter(Boolean)
-         .map((clause, i) => (i === 0 ? `WHERE ${clause}` : `AND ${clause}`))
-         .join(" ")}
+       ${includeSetterComments ? "" : "WHERE c.author_role = 'grounder'"}
        ORDER BY c.id`,
     )
     .all() as BundleComment[];
@@ -202,7 +210,6 @@ export function exportResponses({
        JOIN questions q ON q.id = r.question_id
        LEFT JOIN models m ON m.key = r.model_key
        LEFT JOIN grades g ON g.target_type = 'llm' AND g.target_id = r.id
-       ${localOnly ? "WHERE r.imported = 0" : ""}
        ORDER BY r.id`,
     )
     .all() as (Omit<BundleRun, "turns"> & { uid: string })[];
@@ -265,25 +272,169 @@ export interface ImportResult {
   added: number;
   skipped: number;
   unmatched: number;
+  /** Rows already here that the incoming copy had edited more recently. */
+  updated?: number;
+  /** Grades applied to answers this copy had not graded yet. */
+  grades?: number;
   comments?: number;
   runs?: number;
   models?: number;
+}
+
+type MergedQuestion = {
+  prompt: string;
+  category: string;
+  answer_type: string;
+  options: string | null;
+  type_code: string | null;
+  verifiability: string | null;
+  modality: string | null;
+  probes: string | null;
+  answer_format: string | null;
+  reference_answer: string | null;
+  updated_at: string | null;
+};
+
+/**
+ * Reconciles a question both copies hold. Two rules, in this order:
+ *
+ * 1. A filled-in value always beats an empty one. Classifying a question the
+ *    other side wrote must reach them, and their un-classified copy must never
+ *    blank it back out — which matters because an imported row's timestamp is
+ *    the moment it was imported, not the moment the question was written.
+ * 2. When both sides have a value and they differ, the more recent edit wins.
+ *
+ * Returns null when nothing at all changes, so an unremarkable pull stays
+ * silent. When only the stamp differs the row still takes the later one: the
+ * two copies must agree on it, or each would keep seeing the other's file as
+ * news and rewrite its own, forever. The reference answer, private notes and
+ * the image are not shared fields and are never touched.
+ */
+function mergeQuestion(
+  here: Question,
+  theirs: BundleQuestion,
+): { row: MergedQuestion; contentChanged: boolean } | null {
+  const mine = here.updated_at ?? "";
+  const yours = theirs.updated_at ?? "";
+
+  // Same second, different content: without a rule both copies would think the
+  // other's edit was no newer than their own and each would keep its own
+  // version for good. Comparing the content itself breaks the tie the same way
+  // on both machines, so they end up agreeing rather than quietly diverging.
+  const shared = (q: {
+    prompt: string;
+    category: string;
+    answer_type: string;
+    options: string | null;
+    type_code: string | null;
+    verifiability: string | null;
+    modality: string | null;
+    probes: string | null;
+    answer_format: string | null;
+    reference_answer: string | null;
+  }) =>
+    JSON.stringify([
+      q.prompt,
+      q.category,
+      q.answer_type,
+      q.options,
+      q.type_code,
+      q.verifiability,
+      q.modality,
+      q.probes,
+      q.answer_format,
+      q.reference_answer,
+    ]);
+  const theirContent = shared({
+    prompt: theirs.prompt,
+    category: theirs.category,
+    answer_type: theirs.answer_type,
+    options: theirs.options ? JSON.stringify(theirs.options) : null,
+    type_code: theirs.type_code ?? null,
+    verifiability: theirs.verifiability ?? null,
+    modality: theirs.modality ?? null,
+    probes: theirs.probes ? JSON.stringify(theirs.probes) : null,
+    answer_format: theirs.answer_format ?? null,
+    reference_answer: theirs.reference_answer ?? null,
+  });
+  const theirsIsNewer = yours > mine || (yours === mine && theirContent > shared(here));
+
+  const pick = (ours: string | null, incoming: string | null): string | null => {
+    const oursSet = ours !== null && ours !== "";
+    const incomingSet = incoming !== null && incoming !== "";
+    if (!incomingSet) return ours;
+    if (!oursSet) return incoming;
+    return theirsIsNewer ? incoming : ours;
+  };
+
+  const merged: MergedQuestion = {
+    prompt: pick(here.prompt, theirs.prompt) ?? here.prompt,
+    category: pick(here.category, theirs.category) ?? here.category,
+    answer_type: pick(here.answer_type, theirs.answer_type) ?? here.answer_type,
+    options: pick(here.options, theirs.options ? JSON.stringify(theirs.options) : null),
+    type_code: pick(here.type_code, theirs.type_code ?? null),
+    verifiability: pick(here.verifiability, theirs.verifiability ?? null),
+    modality: pick(here.modality, theirs.modality ?? null),
+    probes: pick(here.probes, theirs.probes ? JSON.stringify(theirs.probes) : null),
+    answer_format: pick(here.answer_format, theirs.answer_format ?? null),
+    reference_answer: pick(here.reference_answer, theirs.reference_answer ?? null),
+    updated_at: here.updated_at,
+  };
+
+  const contentChanged =
+    merged.prompt !== here.prompt ||
+    merged.category !== here.category ||
+    merged.answer_type !== here.answer_type ||
+    merged.options !== here.options ||
+    merged.type_code !== here.type_code ||
+    merged.verifiability !== here.verifiability ||
+    merged.modality !== here.modality ||
+    merged.probes !== here.probes ||
+    merged.answer_format !== here.answer_format ||
+    merged.reference_answer !== here.reference_answer;
+
+  // Which stamp to keep. A real edit carries the later one, because that is the
+  // edit that won. Two copies that already agree on the content settle on the
+  // earlier one instead — they have nothing to argue about, and both picking
+  // the same value is what stops each from seeing the other's file as news and
+  // republishing its own every time it syncs.
+  merged.updated_at = contentChanged
+    ? (yours > mine ? yours : here.updated_at)
+    : !yours || !mine
+      ? here.updated_at ?? theirs.updated_at ?? null
+      : yours < mine
+        ? yours
+        : here.updated_at;
+
+  if (!contentChanged && merged.updated_at === here.updated_at) return null;
+  return { row: merged, contentChanged };
 }
 
 export function importQuestions(bundle: QuestionBundle): ImportResult {
   const db = getDb();
   if (!Array.isArray(bundle.questions)) throw new BundleError("Bundle has no questions.");
 
-  const existing = db.prepare("SELECT 1 FROM questions WHERE uid = ?");
+  const existing = db.prepare("SELECT * FROM questions WHERE uid = ?");
+  // The shared fields only. A reference answer, private notes and the image
+  // stay exactly as they are on this copy.
+  const update = db.prepare(
+    `UPDATE questions
+        SET prompt = ?, category = ?, answer_type = ?, options = ?, type_code = ?,
+            verifiability = ?, modality = ?, probes = ?, answer_format = ?,
+            reference_answer = ?, updated_at = ?
+      WHERE uid = ?`,
+  );
   const insert = db.prepare(
     `INSERT INTO questions
        (uid, image_path, prompt, category, answer_type, options, imported,
-        type_code, verifiability, modality, probes, answer_format)
-     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
+        type_code, verifiability, modality, probes, answer_format, reference_answer,
+        updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
   );
 
   let added = 0;
   let skipped = 0;
+  let updated = 0;
 
   const run = db.transaction((questions: BundleQuestion[]) => {
     for (const q of questions) {
@@ -291,8 +442,28 @@ export function importQuestions(bundle: QuestionBundle): ImportResult {
         skipped += 1;
         continue;
       }
-      if (existing.get(q.uid)) {
-        skipped += 1;
+      const here = existing.get(q.uid) as Question | undefined;
+      if (here) {
+        const merged = mergeQuestion(here, q);
+        if (merged) {
+          const { row } = merged;
+          update.run(
+            row.prompt,
+            row.category,
+            row.answer_type,
+            row.options,
+            row.type_code,
+            row.verifiability,
+            row.modality,
+            row.probes,
+            row.answer_format,
+            row.reference_answer,
+            row.updated_at,
+            q.uid,
+          );
+        }
+        if (merged?.contentChanged) updated += 1;
+        else skipped += 1;
         continue;
       }
 
@@ -316,13 +487,15 @@ export function importQuestions(bundle: QuestionBundle): ImportResult {
         q.modality ?? null,
         q.probes ? JSON.stringify(q.probes) : null,
         q.answer_format ?? null,
+        q.reference_answer ?? null,
+        q.updated_at ?? null,
       );
       added += 1;
     }
   });
 
   run(bundle.questions);
-  return { kind: "questions", added, skipped, unmatched: 0 };
+  return { kind: "questions", added, skipped, updated, unmatched: 0 };
 }
 
 export function importResponses(bundle: ResponseBundle): ImportResult {
@@ -333,7 +506,16 @@ export function importResponses(bundle: ResponseBundle): ImportResult {
   // The same grounder answering the same question twice is a re-import, not a
   // second data point — match on the original timestamp to stay idempotent.
   const duplicate = db.prepare(
-    "SELECT 1 FROM human_responses WHERE question_id = ? AND grounder_name = ? AND created_at = ?",
+    "SELECT id FROM human_responses WHERE question_id = ? AND grounder_name = ? AND created_at = ?",
+  );
+  // A grade is a judgement its grader owns: fill in one we are missing, never
+  // overwrite one made here. Two copies that disagree each keep their own.
+  const hasGrade = db.prepare(
+    "SELECT 1 FROM grades WHERE target_type = ? AND target_id = ?",
+  );
+  const putGrade = db.prepare(
+    `INSERT OR REPLACE INTO grades (target_type, target_id, verdict, grader)
+     VALUES (?, ?, ?, 'synced')`,
   );
   const insert = db.prepare(
     `INSERT INTO human_responses
@@ -344,6 +526,15 @@ export function importResponses(bundle: ResponseBundle): ImportResult {
   let added = 0;
   let skipped = 0;
   let unmatched = 0;
+  let grades = 0;
+
+  /** Applies a verdict that travelled with a row we already had. */
+  const adoptGrade = (targetType: "human" | "llm", targetId: number, verdict?: string | null) => {
+    if (!verdict) return;
+    if (hasGrade.get(targetType, targetId)) return;
+    putGrade.run(targetType, targetId, verdict);
+    grades += 1;
+  };
 
   const run = db.transaction((responses: BundleResponse[]) => {
     for (const r of responses) {
@@ -357,7 +548,12 @@ export function importResponses(bundle: ResponseBundle): ImportResult {
         continue;
       }
       const createdAt = r.created_at ?? new Date().toISOString();
-      if (duplicate.get(question.id, r.grounder_name, createdAt)) {
+      const here = duplicate.get(question.id, r.grounder_name, createdAt) as
+        | { id: number }
+        | undefined;
+      if (here) {
+        // Already have the answer, but its grade may be new to us.
+        adoptGrade("human", here.id, r.verdict);
         skipped += 1;
         continue;
       }
@@ -372,12 +568,15 @@ export function importResponses(bundle: ResponseBundle): ImportResult {
       );
 
       // The grounder's copy has no reference answer, so scoring happens here.
+      // A verdict that travelled with the answer stands in where it can't.
       const verdict = autoGrade(question, r.answer);
       if (verdict) {
         db.prepare(
           `INSERT OR REPLACE INTO grades (target_type, target_id, verdict, grader)
            VALUES ('human', ?, ?, 'auto')`,
         ).run(info.lastInsertRowid, verdict);
+      } else {
+        adoptGrade("human", Number(info.lastInsertRowid), r.verdict);
       }
       added += 1;
     }
@@ -455,7 +654,11 @@ export function importResponses(bundle: ResponseBundle): ImportResult {
   const runRuns = db.transaction((list: BundleRun[]) => {
     for (const item of list) {
       if (!item?.uid || !item.question_uid || !item.model_key) continue;
-      if (runExists.get(item.uid)) continue;
+      const known = runExists.get(item.uid) as { id: number } | undefined;
+      if (known) {
+        adoptGrade("llm", known.id, item.verdict);
+        continue;
+      }
       const question = findQuestion.get(item.question_uid) as Question | undefined;
       if (!question) {
         unmatched += 1;
@@ -493,5 +696,5 @@ export function importResponses(bundle: ResponseBundle): ImportResult {
   if (Array.isArray(bundle.comments)) runComments(bundle.comments);
   if (Array.isArray(bundle.runs)) runRuns(bundle.runs);
 
-  return { kind: "responses", added, skipped, unmatched, comments, runs, models };
+  return { kind: "responses", added, skipped, unmatched, grades, comments, runs, models };
 }

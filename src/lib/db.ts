@@ -162,6 +162,13 @@ function init(): Database.Database {
     }
   }
 
+  // Sync needs to know which side edited a question more recently; rows that
+  // predate the column are as old as their creation.
+  if (!questionColumns.some((c) => c.name === "updated_at")) {
+    db.exec("ALTER TABLE questions ADD COLUMN updated_at TEXT");
+  }
+  db.exec("UPDATE questions SET updated_at = created_at WHERE updated_at IS NULL");
+
   // The taxonomy replaced a three-way category and a two-way answer type.
   const questionCols = (db.prepare("PRAGMA table_info(questions)").all() as { name: string }[])
     .map((c) => c.name);
