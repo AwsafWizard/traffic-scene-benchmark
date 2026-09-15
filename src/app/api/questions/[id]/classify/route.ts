@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { isGrounder } from "@/lib/session";
+import { syncInBackground } from "@/lib/sync";
 import { FORMAT_BY_CODE, TYPE_BY_CODE, type AnswerFormat } from "@/lib/taxonomy";
 
 /** Assigns a taxonomy type to a question written before the taxonomy existed. */
@@ -29,7 +30,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const result = getDb()
     .prepare(
       `UPDATE questions
-          SET type_code = ?, verifiability = ?, modality = ?, probes = ?, answer_format = ?
+          SET type_code = ?, verifiability = ?, modality = ?, probes = ?, answer_format = ?,
+              updated_at = datetime('now')
         WHERE id = ?`,
     )
     .run(
@@ -44,5 +46,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   if (result.changes === 0) {
     return NextResponse.json({ error: "Unknown question" }, { status: 404 });
   }
+
+  // Classifying someone else's question is an edit they should see too.
+  await syncInBackground();
   return NextResponse.json({ ok: true });
 }

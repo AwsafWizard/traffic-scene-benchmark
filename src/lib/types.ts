@@ -29,6 +29,8 @@ export interface Question {
   /** 1 when this question arrived from another install. */
   imported: number;
   created_at: string;
+  /** Last edit to the shared fields, on whichever copy made it. */
+  updated_at: string | null;
 }
 
 export interface HumanResponse {

@@ -129,7 +129,11 @@ function remoteFor(config: SyncConfig): Remote {
 export interface SyncResult {
   pulled: {
     questions: number;
+    /** Questions already here that the other copy had edited more recently. */
+    updated: number;
     answers: number;
+    /** Grades that arrived for answers this copy had not graded. */
+    grades: number;
     comments: number;
     runs: number;
     models: number;
@@ -146,12 +150,29 @@ function fingerprint(json: string): string {
   return crypto.createHash("sha256").update(JSON.stringify(parsed)).digest("hex");
 }
 
+/**
+ * One sync at a time. A tab polls every 30 seconds and every save pushes, so
+ * two runs overlap easily — and since each reads the bookkeeping of what it has
+ * already seen at the start and writes it back at the end, the slower one used
+ * to overwrite the other's record, leaving files marked as read that were never
+ * applied. Callers that arrive mid-run wait for the one in flight instead.
+ */
+let inFlight: Promise<SyncResult> | null = null;
+
 export async function syncNow(): Promise<SyncResult> {
+  if (inFlight) return inFlight;
+  inFlight = runSync().finally(() => {
+    inFlight = null;
+  });
+  return inFlight;
+}
+
+async function runSync(): Promise<SyncResult> {
   const config = getSyncConfig();
   if (config.mode === "off") throw new SyncError("Sync is turned off.");
 
   const remote = remoteFor(config);
-  const pulled = { questions: 0, answers: 0, comments: 0, runs: 0, models: 0 };
+  const pulled = { questions: 0, updated: 0, answers: 0, grades: 0, comments: 0, runs: 0, models: 0 };
   let filesSeen = 0;
 
   const mine = new Set([
@@ -162,6 +183,10 @@ export async function syncNow(): Promise<SyncResult> {
   // Remember each remote file's version so an unchanged one is never
   // re-downloaded — the questions bundle carries every image.
   const seen = JSON.parse(setting("sync_seen") ?? "{}") as Record<string, string>;
+
+  // What we last published for each question. Loaded before the pull, because
+  // importing a question tells us its file is already up to date.
+  const hashes = JSON.parse(setting("sync_hash_q") ?? "{}") as Record<string, string>;
 
   // Questions must land before the answers and model runs that reference them,
   // or a first sync drops them all as unmatched.
@@ -191,19 +216,37 @@ export async function syncNow(): Promise<SyncResult> {
     if (seen[file.name] === file.version) continue;
 
     let bundle;
+    let raw;
     try {
-      bundle = parseBundle(await remote.get(file.name));
+      raw = await remote.get(file.name);
+      bundle = parseBundle(raw);
     } catch {
       // Half-written or foreign file; try again on the next pass.
       continue;
     }
 
     if (bundle.kind === "questions") {
-      pulled.questions += importQuestions(bundle).added;
+      const result = importQuestions(bundle);
+      pulled.questions += result.added;
+      pulled.updated += result.updated ?? 0;
       seen[file.name] = file.version;
+      // We now hold exactly what that file holds, so there is nothing to send
+      // back. If our copy was the newer one it was left alone, and the hash
+      // below won't match — which is precisely when we should publish.
+      //
+      // Only for a question we actually hold. A file blanked because someone
+      // deleted the question carries nothing to hold, and recording it as ours
+      // would have the pass below blank it again on every sync, for good.
+      if (isQuestion) {
+        const uid = file.name.slice(QUESTION_PREFIX.length).replace(/\.json$/, "");
+        const held = getDb().prepare("SELECT 1 FROM questions WHERE uid = ?").get(uid);
+        if (held) hashes[uid] = fingerprint(raw);
+        else delete hashes[uid];
+      }
     } else {
       const result = importResponses(bundle);
       pulled.answers += result.added;
+      pulled.grades += result.grades ?? 0;
       pulled.comments += result.comments ?? 0;
       pulled.runs += result.runs ?? 0;
       pulled.models += result.models ?? 0;
@@ -219,14 +262,15 @@ export async function syncNow(): Promise<SyncResult> {
   const pushed: string[] = [];
   const db = getDb();
 
-  // One file per question, so adding one costs one small upload rather than
-  // republishing every image.
-  const hashes = JSON.parse(setting("sync_hash_q") ?? "{}") as Record<string, string>;
-
   /** A bundle carrying nothing is ~130 bytes of envelope and no payload. */
   const looksEmpty = (name: string) => (ownRemote.get(name) ?? 0) < 200;
+  // Every question, including ones that arrived from the other copy: a
+  // classification or a corrected prompt is an edit they should get back. The
+  // file is keyed by the question's own uid, so this rewrites their file rather
+  // than adding a copy of it, and the hash gate means an untouched question is
+  // never uploaded twice.
   const localQuestions = db
-    .prepare("SELECT id, uid FROM questions WHERE imported = 0 ORDER BY id")
+    .prepare("SELECT id, uid FROM questions ORDER BY id")
     .all() as { id: number; uid: string }[];
 
   for (const question of localQuestions) {
@@ -278,29 +322,19 @@ export async function syncNow(): Promise<SyncResult> {
     pushed.push(`questions-${config.installId}.json`);
   }
 
-  const localAnswers = (
-    db.prepare("SELECT COUNT(*) AS n FROM human_responses WHERE imported = 0").get() as {
-      n: number;
-    }
-  ).n;
-  const localComments = (
-    db
-      .prepare("SELECT COUNT(*) AS n FROM comments WHERE author_role = 'grounder' AND imported = 0")
-      .get() as { n: number }
-  ).n;
-  const localRuns = (
-    db.prepare("SELECT COUNT(*) AS n FROM llm_runs WHERE imported = 0").get() as { n: number }
-  ).n;
-  const localModels = (
-    db.prepare("SELECT COUNT(*) AS n FROM models").get() as { n: number }
-  ).n;
-  if (localAnswers > 0 || localComments > 0 || localRuns > 0 || localModels > 0) {
+  // Everything this copy holds travels, not only what it typed: an answer that
+  // came in by hand-imported bundle, or a grade given to the other side's
+  // answer, would otherwise exist here and nowhere else. Imports are keyed and
+  // idempotent, so the copies converge instead of accumulating duplicates.
+  const count = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
+  const haveSomethingToSay =
+    count("SELECT COUNT(*) AS n FROM human_responses") > 0 ||
+    count("SELECT COUNT(*) AS n FROM comments WHERE author_role = 'grounder'") > 0 ||
+    count("SELECT COUNT(*) AS n FROM llm_runs") > 0 ||
+    count("SELECT COUNT(*) AS n FROM models") > 0;
+  if (haveSomethingToSay) {
     const name = `answers-${config.installId}.json`;
-    const body = JSON.stringify(
-      exportResponses({ includeSetterComments: false, localOnly: true }),
-      null,
-      2,
-    );
+    const body = JSON.stringify(exportResponses({ includeSetterComments: false }), null, 2);
     const hash = fingerprint(body);
     if (setting("sync_hash_answers") !== hash || looksEmpty(name)) {
       await remote.put(name, body);

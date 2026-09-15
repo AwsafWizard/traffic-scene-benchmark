@@ -143,6 +143,12 @@ export function SyncSettings({ config }: { config: SyncConfig }) {
           {result.pulled.models > 0 && `, ${result.pulled.models} model`}
           {result.pulled.models > 1 ? "s" : ""} from {result.filesSeen} file
           {result.filesSeen === 1 ? "" : "s"}.
+          {result.pulled.updated > 0 &&
+            ` Updated ${result.pulled.updated} question${
+              result.pulled.updated === 1 ? "" : "s"
+            } edited on the other copy.`}
+          {result.pulled.grades > 0 &&
+            ` Took ${result.pulled.grades} grade${result.pulled.grades === 1 ? "" : "s"}.`}
           {result.pushed.length > 0 && ` Wrote ${result.pushed.join(", ")}.`}
         </p>
       )}
@@ -169,7 +175,9 @@ export function SyncPoller({ intervalMs = 30000 }: { intervalMs?: number }) {
         const result = (await response.json()) as SyncResult;
         const total =
           result.pulled.questions +
+          result.pulled.updated +
           result.pulled.answers +
+          result.pulled.grades +
           result.pulled.comments +
           result.pulled.runs +
           result.pulled.models;

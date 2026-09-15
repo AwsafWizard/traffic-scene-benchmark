@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:partner": "BENCH_DATA_DIR=data-partner NEXT_DIST_DIR=.next-partner next dev --port 3001",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

@@ -3,8 +3,19 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+/**
+ * Where this copy keeps its database and images. Defaults to `data/`; set
+ * BENCH_DATA_DIR to run a second copy out of the same checkout — a stand-in
+ * for your partner's machine, with its own install id, so you can watch both
+ * sides of a sync at once.
+ */
+export function dataDir(): string {
+  const configured = process.env.BENCH_DATA_DIR?.trim();
+  return configured ? path.resolve(process.cwd(), configured) : path.join(process.cwd(), "data");
+}
+
 export function uploadPath(name: string): string {
-  const dir = path.join(process.cwd(), "data", "uploads");
+  const dir = path.join(dataDir(), "uploads");
   fs.mkdirSync(dir, { recursive: true });
   return path.join(dir, name);
 }
@@ -12,7 +23,7 @@ export function uploadPath(name: string): string {
 const globalForDb = globalThis as unknown as { __benchDb?: Database.Database };
 
 function init(): Database.Database {
-  const dir = path.join(process.cwd(), "data");
+  const dir = dataDir();
   fs.mkdirSync(path.join(dir, "uploads"), { recursive: true });
 
   const db = new Database(path.join(dir, "bench.db"), { timeout: 5000 });
@@ -36,6 +47,9 @@ function init(): Database.Database {
       answer_format TEXT,
       reference_answer TEXT,
       notes TEXT,
+      -- Bumped whenever the shared part of the question is edited here, so a
+      -- classification made on either copy can be told apart from a stale one.
+      updated_at TEXT,
       -- 1 when this row arrived from another install, so folder sync doesn't
       -- bounce the same question back and forth between copies.
       imported INTEGER NOT NULL DEFAULT 0,
@@ -147,6 +161,13 @@ function init(): Database.Database {
       db.exec(`ALTER TABLE ${table} ADD COLUMN imported INTEGER NOT NULL DEFAULT 0`);
     }
   }
+
+  // Sync needs to know which side edited a question more recently; rows that
+  // predate the column are as old as their creation.
+  if (!questionColumns.some((c) => c.name === "updated_at")) {
+    db.exec("ALTER TABLE questions ADD COLUMN updated_at TEXT");
+  }
+  db.exec("UPDATE questions SET updated_at = created_at WHERE updated_at IS NULL");
 
   // The taxonomy replaced a three-way category and a two-way answer type.
   const questionCols = (db.prepare("PRAGMA table_info(questions)").all() as { name: string }[])

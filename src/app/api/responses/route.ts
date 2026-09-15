@@ -45,8 +45,9 @@ export async function POST(request: Request) {
     ).run(info.lastInsertRowid, verdict);
   }
 
-  // Hand back the next unanswered question so the grounder can keep going without
-  // passing through the Compare page, which would reveal the answers.
+  // Hand back the next unanswered question so a copy that only grounds can keep
+  // going without passing through the Compare page, which would reveal the
+  // answers.
   const next = getDb()
     .prepare(
       `SELECT q.id FROM questions q
@@ -57,9 +58,10 @@ export async function POST(request: Request) {
 
   await syncInBackground();
 
-  // Answering someone else's question keeps you in the blind flow; answering
-  // your own can go straight to the comparison, since you wrote the answer key.
-  const stayBlind = (await isGrounder()) || Boolean(question.imported);
+  // Only a copy set to Grounder stays blind. Having now answered the question
+  // yourself there is nothing left to spoil, whether you wrote it or your
+  // partner did — and the button did say "Submit and reveal".
+  const stayBlind = await isGrounder();
 
   return NextResponse.json(
     { id: info.lastInsertRowid, next_question_id: next?.id ?? null, stay_blind: stayBlind },
