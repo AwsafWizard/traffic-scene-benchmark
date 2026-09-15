@@ -6,6 +6,7 @@ import {
   FORMATS,
   MODALITY,
   VERIFIABILITY,
+  typesInDimension,
   type Modality,
   type Verifiability,
 } from "@/lib/taxonomy";
@@ -40,6 +41,19 @@ function Bar({ value, muted = false }: { value: number | null; muted?: boolean }
         />
       </span>
       <span className="tabular-nums">{pct(value)}</span>
+    </span>
+  );
+}
+
+/** Human minus models, in points. Green once the type is really separating them. */
+function Gap({ value }: { value: number | null }) {
+  if (value == null) return <span className="text-muted">—</span>;
+  return (
+    <span
+      className={value >= 0.5 ? "text-emerald-500" : value > 0 ? "text-foreground" : "text-muted"}
+    >
+      {value > 0 ? "+" : ""}
+      {Math.round(value * 100)}
     </span>
   );
 }
@@ -83,7 +97,8 @@ const td = "px-3 py-2 text-sm";
 export default async function StatsPage() {
   await requireBenchmarkerPage();
   const stats = computeDetailedStats();
-  const { inventory: inv, performers, coverage, questions, emptyTypes, totals } = stats;
+  const { inventory: inv, performers, coverage, dimensionCoverage, questions, emptyTypes, totals } =
+    stats;
 
   if (inv.questions === 0) {
     return (
@@ -98,6 +113,8 @@ export default async function StatsPage() {
 
   const usedFormats = FORMATS.filter((f) => inv.byFormat[f.code]);
   const models = performers.filter((p) => !p.isHuman);
+  // Type, questions, human, all models, one per model, gap.
+  const typeColumns = 5 + models.length;
 
   return (
     <div className="space-y-10">
@@ -151,19 +168,57 @@ export default async function StatsPage() {
         <div className="grid gap-4 lg:grid-cols-3">
           <div className="overflow-hidden rounded-xl border border-line bg-surface">
             <p className="border-b border-line px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted">
-              By dimension
+              By dimension and type
             </p>
             <ul className="divide-y divide-line">
-              {DIMENSIONS.map((d) => (
-                <li key={d.id} className="flex items-center gap-3 px-3 py-2 text-sm">
-                  <span className="w-4 shrink-0 font-mono text-xs text-muted">{d.id}</span>
-                  <span className="min-w-0 flex-1 truncate" title={d.name}>
-                    {d.name}
-                  </span>
-                  <span className="tabular-nums text-muted">{inv.byDimension[d.id] ?? 0}</span>
-                </li>
-              ))}
+              {DIMENSIONS.map((d) => {
+                const types = typesInDimension(d.id);
+                const covered = types.filter((t) => inv.byType[t.code]).length;
+                return (
+                  <li key={d.id}>
+                    <details className="group">
+                      <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-2 text-sm [&::-webkit-details-marker]:hidden">
+                        <span className="w-4 shrink-0 font-mono text-xs text-muted">{d.id}</span>
+                        <span className="min-w-0 flex-1 truncate" title={d.blurb}>
+                          {d.name}
+                        </span>
+                        <span className="text-xs text-muted">
+                          {covered}/{types.length}
+                        </span>
+                        <span className="tabular-nums text-muted">
+                          {inv.byDimension[d.id] ?? 0}
+                        </span>
+                        <span className="text-xs text-muted transition group-open:rotate-90">
+                          ▸
+                        </span>
+                      </summary>
+                      <ul className="border-t border-line bg-background/50 py-1">
+                        {types.map((t) => {
+                          const n = inv.byType[t.code] ?? 0;
+                          return (
+                            <li
+                              key={t.code}
+                              className={`flex items-center gap-2 px-3 py-1 text-xs ${n ? "" : "text-muted"}`}
+                            >
+                              <span className="w-7 shrink-0 font-mono text-muted">{t.code}</span>
+                              <span className="min-w-0 flex-1 truncate" title={t.example}>
+                                {t.name}
+                              </span>
+                              {t.regional && <span className="text-accent">★</span>}
+                              <span className="tabular-nums">{n}</span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </details>
+                  </li>
+                );
+              })}
             </ul>
+            <p className="border-t border-line px-3 py-2 text-xs text-muted">
+              Open a dimension for the fine-grained types inside it. The count beside each
+              dimension is how many of its types have a question.
+            </p>
           </div>
 
           <div className="overflow-hidden rounded-xl border border-line bg-surface">
@@ -348,81 +403,33 @@ export default async function StatsPage() {
             Per fine-grained type
           </h2>
           <p className="mt-1 text-sm text-muted">
-            A type where humans score well and models don&apos;t is one worth building out.{" "}
+            The dimension cut above, one level finer, with each answerer kept separate. A type
+            where humans score well and models don&apos;t is one worth building out.{" "}
             {totals.discriminative > 0 &&
               `${totals.discriminative} ${totals.discriminative === 1 ? "type is" : "types are"} discriminating clearly.`}
           </p>
         </div>
 
         <div className="overflow-x-auto rounded-xl border border-line bg-surface">
-          <table className="w-full min-w-[680px]">
+          <table className="w-full min-w-[720px]">
             <thead>
               <tr className="border-b border-line">
-                <th className={th}>Type</th>
+                <th className={th}>Dimension / type</th>
                 <th className={th}>Questions</th>
                 <th className={th}>Human</th>
-                <th className={th}>Models</th>
+                <th className={th}>All models</th>
+                {models.map((m) => (
+                  <th key={m.key} className={th} title={m.label}>
+                    <span className="block max-w-28 truncate">{m.label}</span>
+                  </th>
+                ))}
                 <th className={th}>Gap</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-line">
-              {coverage.map((c) => (
-                <tr key={c.code}>
-                  <td className={td}>
-                    <span className="flex items-baseline gap-2">
-                      <span className="font-mono text-xs text-muted">{c.code}</span>
-                      <span className="truncate">{c.name}</span>
-                      {c.regional && <span className="text-xs text-accent">★</span>}
-                    </span>
-                  </td>
-                  <td className={`${td} tabular-nums text-muted`}>{c.questions}</td>
-                  <td className={td}>
-                    <Cell
-                      score={{
-                        accuracy: c.humanAccuracy,
-                        graded: c.humanAnswers,
-                        correct: 0,
-                        partial: 0,
-                        incorrect: 0,
-                        ungraded: 0,
-                      }}
-                    />
-                  </td>
-                  <td className={td}>
-                    <Cell
-                      score={{
-                        accuracy: c.modelAccuracy,
-                        graded: c.modelAnswers,
-                        correct: 0,
-                        partial: 0,
-                        incorrect: 0,
-                        ungraded: 0,
-                      }}
-                    />
-                  </td>
-                  <td className={`${td} tabular-nums`}>
-                    {c.gap == null ? (
-                      <span className="text-muted">—</span>
-                    ) : (
-                      <span
-                        className={
-                          c.gap >= 0.5
-                            ? "text-emerald-500"
-                            : c.gap > 0
-                              ? "text-foreground"
-                              : "text-muted"
-                        }
-                      >
-                        {c.gap > 0 ? "+" : ""}
-                        {Math.round(c.gap * 100)}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {coverage.length === 0 && (
+            {coverage.length === 0 ? (
+              <tbody>
                 <tr>
-                  <td colSpan={5} className="px-3 py-6 text-center text-sm text-muted">
+                  <td colSpan={typeColumns} className="px-3 py-6 text-center text-sm text-muted">
                     No classified questions yet.{" "}
                     <Link href="/classify" className="text-accent underline">
                       Classify them
@@ -430,10 +437,77 @@ export default async function StatsPage() {
                     to see this broken down.
                   </td>
                 </tr>
-              )}
-            </tbody>
+              </tbody>
+            ) : (
+              dimensionCoverage
+                .filter((d) => coverage.some((c) => c.dimension === d.id))
+                .map((d) => (
+                  <tbody key={d.id} className="divide-y divide-line border-t border-line">
+                    {/* The dimension its types roll up into, so both cuts sit side by side. */}
+                    <tr className="bg-foreground/5">
+                      <td className={`${td} font-medium`}>
+                        <span className="flex items-baseline gap-2">
+                          <span className="font-mono text-xs text-muted">D{d.id}</span>
+                          <span className="truncate">{d.name}</span>
+                          <span className="text-xs text-muted">
+                            {d.typesCovered}/{d.typesTotal} types
+                          </span>
+                        </span>
+                      </td>
+                      <td className={`${td} tabular-nums text-muted`}>{d.questions}</td>
+                      <td className={td}>
+                        <Cell score={d.human} />
+                      </td>
+                      <td className={td}>
+                        <Cell score={d.models} />
+                      </td>
+                      {models.map((m) => (
+                        <td key={m.key} className={td}>
+                          <Cell score={m.byDimension[d.id]} />
+                        </td>
+                      ))}
+                      <td className={`${td} tabular-nums`}>
+                        <Gap value={d.gap} />
+                      </td>
+                    </tr>
+                    {coverage
+                      .filter((c) => c.dimension === d.id)
+                      .map((c) => (
+                        <tr key={c.code}>
+                          <td className={td}>
+                            <span className="flex items-baseline gap-2 pl-4">
+                              <span className="font-mono text-xs text-muted">{c.code}</span>
+                              <span className="truncate">{c.name}</span>
+                              {c.regional && <span className="text-xs text-accent">★</span>}
+                            </span>
+                          </td>
+                          <td className={`${td} tabular-nums text-muted`}>{c.questions}</td>
+                          <td className={td}>
+                            <Cell score={c.human} />
+                          </td>
+                          <td className={td}>
+                            <Cell score={c.models} />
+                          </td>
+                          {models.map((m) => (
+                            <td key={m.key} className={td}>
+                              <Cell score={m.byType[c.code]} />
+                            </td>
+                          ))}
+                          <td className={`${td} tabular-nums`}>
+                            <Gap value={c.gap} />
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                ))
+            )}
           </table>
         </div>
+        <p className="text-xs text-muted">
+          A dimension row is every type beneath it pooled, so a strong dimension can still hide a
+          type nobody can answer. Unclassified questions count towards a dimension but towards no
+          type.
+        </p>
       </section>
 
       {/* ---------- per question ---------- */}

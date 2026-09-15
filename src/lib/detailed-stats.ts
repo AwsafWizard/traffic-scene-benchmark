@@ -62,11 +62,24 @@ export interface TypeCoverage {
   dimension: number;
   regional: boolean;
   questions: number;
-  humanAnswers: number;
-  modelAnswers: number;
-  humanAccuracy: number | null;
-  modelAccuracy: number | null;
+  /** The human baseline on this type. Zeroed when nobody has answered it. */
+  human: Scored;
+  /** Every model pooled together, so the gap has one number to compare against. */
+  models: Scored;
   /** Human minus model. High means the question is doing work. */
+  gap: number | null;
+}
+
+/** A dimension summarised over the fine-grained types inside it. */
+export interface DimensionCoverage {
+  id: number;
+  name: string;
+  questions: number;
+  /** Types in this dimension that have at least one question, and how many exist. */
+  typesCovered: number;
+  typesTotal: number;
+  human: Scored;
+  models: Scored;
   gap: number | null;
 }
 
@@ -74,6 +87,8 @@ export interface Inventory {
   questions: number;
   classified: number;
   byDimension: Record<number, number>;
+  /** Questions per fine-grained type code — the finer cut of byDimension. */
+  byType: Record<string, number>;
   byVerifiability: Record<string, number>;
   byModality: Record<string, number>;
   byFormat: Record<string, number>;
@@ -102,6 +117,7 @@ export interface DetailedStats {
   inventory: Inventory;
   performers: Performer[];
   coverage: TypeCoverage[];
+  dimensionCoverage: DimensionCoverage[];
   questions: QuestionStat[];
   emptyTypes: { code: string; name: string; dimension: number }[];
   totals: {
@@ -159,6 +175,7 @@ export function computeDetailedStats(): DetailedStats {
     questions: questions.length,
     classified: 0,
     byDimension: {},
+    byType: {},
     byVerifiability: {},
     byModality: {},
     byFormat: {},
@@ -196,6 +213,7 @@ export function computeDetailedStats(): DetailedStats {
     inventory.byFormat[format] = (inventory.byFormat[format] ?? 0) + 1;
   }
   inventory.typesCovered = questionsPerType.size;
+  inventory.byType = Object.fromEntries(questionsPerType);
 
   const modelRows = db
     .prepare(
@@ -301,33 +319,50 @@ export function computeDetailedStats(): DetailedStats {
   const human = performerList.find((p) => p.isHuman);
   const models = performerList.filter((p) => !p.isHuman);
 
+  const accumulate = (into: Tally, from: Tally | undefined): Tally => {
+    if (!from) return into;
+    into.correct += from.correct;
+    into.partial += from.partial;
+    into.incorrect += from.incorrect;
+    into.graded += from.graded;
+    into.ungraded += from.ungraded;
+    return into;
+  };
+
+  const gapBetween = (h: Scored, m: Scored) =>
+    h.accuracy != null && m.accuracy != null ? h.accuracy - m.accuracy : null;
+
   const coverage: TypeCoverage[] = TYPES.filter((t) => questionsPerType.has(t.code)).map((t) => {
-    const humanScore = human?.byType[t.code] ?? null;
-    const modelTally = blank();
-    for (const m of models) {
-      const s = m.byType[t.code];
-      if (!s) continue;
-      modelTally.correct += s.correct;
-      modelTally.partial += s.partial;
-      modelTally.incorrect += s.incorrect;
-      modelTally.graded += s.graded;
-      modelTally.ungraded += s.ungraded;
-    }
-    const modelScore = scored(modelTally);
+    const humanScore = scored(accumulate(blank(), human?.byType[t.code]));
+    const modelScore = scored(models.reduce((acc, m) => accumulate(acc, m.byType[t.code]), blank()));
     return {
       code: t.code,
       name: t.name,
       dimension: t.dimension,
       regional: Boolean(t.regional),
       questions: questionsPerType.get(t.code) ?? 0,
-      humanAnswers: (humanScore?.graded ?? 0) + (humanScore?.ungraded ?? 0),
-      modelAnswers: modelScore.graded + modelScore.ungraded,
-      humanAccuracy: humanScore?.accuracy ?? null,
-      modelAccuracy: modelScore.accuracy,
-      gap:
-        humanScore?.accuracy != null && modelScore.accuracy != null
-          ? humanScore.accuracy - modelScore.accuracy
-          : null,
+      human: humanScore,
+      models: modelScore,
+      gap: gapBetween(humanScore, modelScore),
+    };
+  });
+
+  // The same rollup one level up, so a dimension row can head its types.
+  const dimensionCoverage: DimensionCoverage[] = DIMENSIONS.map((d) => {
+    const humanScore = scored(accumulate(blank(), human?.byDimension[d.id]));
+    const modelScore = scored(
+      models.reduce((acc, m) => accumulate(acc, m.byDimension[d.id]), blank()),
+    );
+    const types = TYPES.filter((t) => t.dimension === d.id);
+    return {
+      id: d.id,
+      name: d.name,
+      questions: inventory.byDimension[d.id] ?? 0,
+      typesCovered: types.filter((t) => questionsPerType.has(t.code)).length,
+      typesTotal: types.length,
+      human: humanScore,
+      models: modelScore,
+      gap: gapBetween(humanScore, modelScore),
     };
   });
 
@@ -376,6 +411,7 @@ export function computeDetailedStats(): DetailedStats {
     inventory,
     performers: performerList,
     coverage,
+    dimensionCoverage,
     questions: perQuestion,
     emptyTypes: TYPES.filter((t) => !questionsPerType.has(t.code)).map((t) => ({
       code: t.code,
