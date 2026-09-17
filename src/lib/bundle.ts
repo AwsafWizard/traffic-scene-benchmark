@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { getDb, uploadPath } from "./db";
+import { regradeQuestion } from "./regrade";
 import { autoGrade } from "./scoring";
 import type { AnswerType, Category, Question, Verdict } from "./types";
 
@@ -35,6 +36,12 @@ export interface BundleQuestion {
   reference_answer?: string | null;
   /** When the shared fields were last edited. Absent on pre-taxonomy bundles. */
   updated_at?: string | null;
+  /**
+   * Shared fields the sender deliberately emptied as of updated_at. Without it
+   * an emptied field looks the same as one never filled in, and the other copy's
+   * old value would win back every time. Absent on older bundles.
+   */
+  cleared?: string[] | null;
 }
 
 export interface BundleResponse {
@@ -153,6 +160,7 @@ export function exportQuestions(ids?: number[]): QuestionBundle {
       answer_format: q.answer_format,
       reference_answer: q.reference_answer,
       updated_at: q.updated_at ?? null,
+      cleared: q.cleared_fields ? (JSON.parse(q.cleared_fields) as string[]) : null,
       image: {
         media_type: MEDIA[ext] ?? "image/png",
         data: fs.readFileSync(uploadPath(q.image_path)).toString("base64"),
@@ -293,22 +301,26 @@ type MergedQuestion = {
   answer_format: string | null;
   reference_answer: string | null;
   updated_at: string | null;
+  cleared_fields: string | null;
 };
 
 /**
  * Reconciles a question both copies hold. Two rules, in this order:
  *
- * 1. A filled-in value always beats an empty one. Classifying a question the
- *    other side wrote must reach them, and their un-classified copy must never
- *    blank it back out — which matters because an imported row's timestamp is
- *    the moment it was imported, not the moment the question was written.
+ * 1. A filled-in value beats an empty one. Classifying a question the other
+ *    side wrote must reach them, and their un-classified copy must never blank
+ *    it back out — which matters because an imported row's timestamp is the
+ *    moment it was imported, not the moment the question was written.
+ *    The exception is a field an edit deliberately emptied: a newer edit that
+ *    removed a reference answer or an option list beats the older value, or
+ *    removing anything could never reach the other copy.
  * 2. When both sides have a value and they differ, the more recent edit wins.
  *
  * Returns null when nothing at all changes, so an unremarkable pull stays
  * silent. When only the stamp differs the row still takes the later one: the
  * two copies must agree on it, or each would keep seeing the other's file as
- * news and rewrite its own, forever. The reference answer, private notes and
- * the image are not shared fields and are never touched.
+ * news and rewrite its own, forever. Private notes and the image are not shared
+ * fields and are never touched.
  */
 function mergeQuestion(
   here: Question,
@@ -359,27 +371,57 @@ function mergeQuestion(
   });
   const theirsIsNewer = yours > mine || (yours === mine && theirContent > shared(here));
 
-  const pick = (ours: string | null, incoming: string | null): string | null => {
+  const clearedHere = new Set<string>(
+    here.cleared_fields ? (JSON.parse(here.cleared_fields) as string[]) : [],
+  );
+  const clearedThere = new Set<string>(theirs.cleared ?? []);
+
+  const pick = (
+    field: string,
+    ours: string | null,
+    incoming: string | null,
+  ): string | null => {
     const oursSet = ours !== null && ours !== "";
     const incomingSet = incoming !== null && incoming !== "";
-    if (!incomingSet) return ours;
-    if (!oursSet) return incoming;
-    return theirsIsNewer ? incoming : ours;
+    if (oursSet && incomingSet) return theirsIsNewer ? incoming : ours;
+    if (!oursSet && !incomingSet) return ours;
+    // Exactly one side has a value. It wins unless the empty side emptied the
+    // field on purpose in the more recent edit.
+    if (incomingSet) return clearedHere.has(field) && !theirsIsNewer ? ours : incoming;
+    return clearedThere.has(field) && theirsIsNewer ? incoming : ours;
   };
 
   const merged: MergedQuestion = {
-    prompt: pick(here.prompt, theirs.prompt) ?? here.prompt,
-    category: pick(here.category, theirs.category) ?? here.category,
-    answer_type: pick(here.answer_type, theirs.answer_type) ?? here.answer_type,
-    options: pick(here.options, theirs.options ? JSON.stringify(theirs.options) : null),
-    type_code: pick(here.type_code, theirs.type_code ?? null),
-    verifiability: pick(here.verifiability, theirs.verifiability ?? null),
-    modality: pick(here.modality, theirs.modality ?? null),
-    probes: pick(here.probes, theirs.probes ? JSON.stringify(theirs.probes) : null),
-    answer_format: pick(here.answer_format, theirs.answer_format ?? null),
-    reference_answer: pick(here.reference_answer, theirs.reference_answer ?? null),
+    prompt: pick("prompt", here.prompt, theirs.prompt) ?? here.prompt,
+    category: pick("category", here.category, theirs.category) ?? here.category,
+    answer_type: pick("answer_type", here.answer_type, theirs.answer_type) ?? here.answer_type,
+    options: pick(
+      "options",
+      here.options,
+      theirs.options ? JSON.stringify(theirs.options) : null,
+    ),
+    type_code: pick("type_code", here.type_code, theirs.type_code ?? null),
+    verifiability: pick("verifiability", here.verifiability, theirs.verifiability ?? null),
+    modality: pick("modality", here.modality, theirs.modality ?? null),
+    probes: pick("probes", here.probes, theirs.probes ? JSON.stringify(theirs.probes) : null),
+    answer_format: pick("answer_format", here.answer_format, theirs.answer_format ?? null),
+    reference_answer: pick(
+      "reference_answer",
+      here.reference_answer,
+      theirs.reference_answer ?? null,
+    ),
     updated_at: here.updated_at,
+    cleared_fields: here.cleared_fields,
   };
+
+  // A field stays marked as deliberately emptied only while it is still empty.
+  const stillCleared = [...new Set([...clearedHere, ...clearedThere])]
+    .filter((field) => {
+      const value = merged[field as keyof MergedQuestion];
+      return value === null || value === "";
+    })
+    .sort();
+  merged.cleared_fields = stillCleared.length ? JSON.stringify(stillCleared) : null;
 
   const contentChanged =
     merged.prompt !== here.prompt ||
@@ -421,20 +463,22 @@ export function importQuestions(bundle: QuestionBundle): ImportResult {
     `UPDATE questions
         SET prompt = ?, category = ?, answer_type = ?, options = ?, type_code = ?,
             verifiability = ?, modality = ?, probes = ?, answer_format = ?,
-            reference_answer = ?, updated_at = ?
+            reference_answer = ?, updated_at = ?, cleared_fields = ?
       WHERE uid = ?`,
   );
   const insert = db.prepare(
     `INSERT INTO questions
        (uid, image_path, prompt, category, answer_type, options, imported,
         type_code, verifiability, modality, probes, answer_format, reference_answer,
-        updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
+        updated_at, cleared_fields)
+     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
 
   let added = 0;
   let skipped = 0;
   let updated = 0;
+  /** Questions whose content changed, so their automatic verdicts need redoing. */
+  const rescored: number[] = [];
 
   const run = db.transaction((questions: BundleQuestion[]) => {
     for (const q of questions) {
@@ -459,11 +503,14 @@ export function importQuestions(bundle: QuestionBundle): ImportResult {
             row.answer_format,
             row.reference_answer,
             row.updated_at,
+            row.cleared_fields,
             q.uid,
           );
         }
-        if (merged?.contentChanged) updated += 1;
-        else skipped += 1;
+        if (merged?.contentChanged) {
+          updated += 1;
+          rescored.push(here.id);
+        } else skipped += 1;
         continue;
       }
 
@@ -489,12 +536,16 @@ export function importQuestions(bundle: QuestionBundle): ImportResult {
         q.answer_format ?? null,
         q.reference_answer ?? null,
         q.updated_at ?? null,
+        q.cleared?.length ? JSON.stringify(q.cleared) : null,
       );
       added += 1;
     }
   });
 
   run(bundle.questions);
+  // An edit from the other copy can change the answer key, and every automatic
+  // verdict here was scored against the old one.
+  for (const id of rescored) regradeQuestion(id);
   return { kind: "questions", added, skipped, updated, unmatched: 0 };
 }
 

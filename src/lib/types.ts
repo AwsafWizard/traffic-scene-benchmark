@@ -31,6 +31,8 @@ export interface Question {
   created_at: string;
   /** Last edit to the shared fields, on whichever copy made it. */
   updated_at: string | null;
+  /** JSON array of shared fields an edit deliberately emptied. */
+  cleared_fields: string | null;
 }
 
 export interface HumanResponse {

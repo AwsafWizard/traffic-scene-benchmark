@@ -57,6 +57,28 @@ Nothing else is needed to work alone. To work with someone else, see
 4. **Statistics** — what the benchmark covers, how each model does across it, and which
    individual questions are earning their place.
 
+### Editing a question
+
+**Edit** on a question card, or **Edit question** on its Compare page. You can change the
+wording, the type and its labels, the options, the reference answer, and your notes. The edit
+syncs: the question's file in the shared bucket is rewritten and the other copy picks it up on
+its next pull.
+
+- **Everything but your notes travels.** A notes-only edit stays on your machine and sends
+  nothing.
+- **Removing something travels too.** Clearing a reference answer, or switching to a format
+  with no option list, reaches the other copy instead of their old value winning it back.
+- **Automatic grades follow the new key.** Changing the reference answer, format or options
+  re-scores every automatic verdict on the question, on both copies. A grade someone gave by
+  hand is never touched.
+- **The image can't be swapped.** Every answer already given was to that scene — to ask about a
+  different one, add a new question.
+- **The blind rule still applies.** The edit form shows the answer key, so a question your
+  partner wrote stays locked until you've answered it, exactly like Compare.
+
+If a question already has answers, the form says how many, since rewording it changes what
+they were answering.
+
 ### The taxonomy
 
 Questions are classified on two levels: one of six **dimensions**, then a **fine-grained type**

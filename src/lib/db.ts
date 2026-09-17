@@ -50,6 +50,8 @@ function init(): Database.Database {
       -- Bumped whenever the shared part of the question is edited here, so a
       -- classification made on either copy can be told apart from a stale one.
       updated_at TEXT,
+      -- Shared fields an edit deliberately emptied, as of updated_at.
+      cleared_fields TEXT,
       -- 1 when this row arrived from another install, so folder sync doesn't
       -- bounce the same question back and forth between copies.
       imported INTEGER NOT NULL DEFAULT 0,
@@ -168,6 +170,12 @@ function init(): Database.Database {
     db.exec("ALTER TABLE questions ADD COLUMN updated_at TEXT");
   }
   db.exec("UPDATE questions SET updated_at = created_at WHERE updated_at IS NULL");
+
+  // An empty field can mean "never filled in" or "deliberately removed", and
+  // sync has to treat those oppositely. Edits record which it was.
+  if (!questionColumns.some((c) => c.name === "cleared_fields")) {
+    db.exec("ALTER TABLE questions ADD COLUMN cleared_fields TEXT");
+  }
 
   // The taxonomy replaced a three-way category and a two-way answer type.
   const questionCols = (db.prepare("PRAGMA table_info(questions)").all() as { name: string }[])

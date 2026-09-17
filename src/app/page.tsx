@@ -92,6 +92,12 @@ export default async function Home() {
                 >
                   Compare
                 </Link>
+                <Link
+                  href={`/edit/${q.id}`}
+                  className="rounded-md border border-line px-3 py-1.5 transition hover:bg-background"
+                >
+                  Edit
+                </Link>
               </div>
             </div>
           </div>
