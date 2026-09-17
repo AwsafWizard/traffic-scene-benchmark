@@ -158,13 +158,28 @@ function fingerprint(json: string): string {
  * applied. Callers that arrive mid-run wait for the one in flight instead.
  */
 let inFlight: Promise<SyncResult> | null = null;
+let queued: Promise<SyncResult> | null = null;
 
-export async function syncNow(): Promise<SyncResult> {
-  if (inFlight) return inFlight;
-  inFlight = runSync().finally(() => {
-    inFlight = null;
-  });
-  return inFlight;
+export function syncNow(): Promise<SyncResult> {
+  if (!inFlight) {
+    inFlight = runSync().finally(() => {
+      inFlight = null;
+    });
+    return inFlight;
+  }
+  // A run is already going and may have read the database before the change
+  // that prompted this call was written — joining it would let an edit sit
+  // unpublished until something else happened to sync. Queue exactly one more
+  // run after it instead, shared by everyone who asks in the meantime.
+  if (!queued) {
+    queued = inFlight
+      .catch(() => undefined)
+      .then(() => {
+        queued = null;
+        return syncNow();
+      });
+  }
+  return queued;
 }
 
 async function runSync(): Promise<SyncResult> {
@@ -218,10 +233,11 @@ async function runSync(): Promise<SyncResult> {
     let bundle;
     let raw;
     try {
-      raw = await remote.get(file.name);
+      raw = await remote.get(file);
       bundle = parseBundle(raw);
     } catch {
-      // Half-written or foreign file; try again on the next pass.
+      // Half-written, foreign, or still cached at an older version. Leaving it
+      // unmarked means the next pass tries again.
       continue;
     }
 

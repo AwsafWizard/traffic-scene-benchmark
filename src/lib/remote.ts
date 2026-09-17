@@ -9,7 +9,8 @@ import path from "node:path";
 export interface Remote {
   readonly label: string;
   list(): Promise<RemoteFile[]>;
-  get(name: string): Promise<string>;
+  /** Fetches the file as it was listed, never an older copy of it. */
+  get(file: RemoteFile): Promise<string>;
   put(name: string, contents: string): Promise<void>;
 }
 
@@ -18,9 +19,17 @@ export interface RemoteFile {
   /** Changes when the file does, so we can skip re-downloading it. */
   version: string;
   size: number;
+  /** The content's ETag, where the remote reports one. */
+  etag?: string;
 }
 
 export class RemoteError extends Error {}
+
+/** Compares ETags whether or not they carry quotes or a weak marker. */
+function sameEtag(a: string, b: string): boolean {
+  const bare = (tag: string) => tag.replace(/^W\//, "").replace(/"/g, "");
+  return bare(a) === bare(b);
+}
 
 /** Questions live one-per-file under this prefix; see sync.ts. */
 export const QUESTION_PREFIX = "q/";
@@ -52,8 +61,8 @@ export function folderRemote(dir: string): Remote {
       scan(QUESTION_PREFIX);
       return entries;
     },
-    async get(name) {
-      return fs.readFileSync(path.join(dir, name), "utf8");
+    async get(file) {
+      return fs.readFileSync(path.join(dir, file.name), "utf8");
     },
     async put(name, contents) {
       const target = path.join(dir, name);
@@ -122,7 +131,7 @@ export function supabaseRemote({ url, anonKey, bucket }: SupabaseSettings): Remo
             id: string | null;
             name: string;
             updated_at?: string;
-            metadata?: { size?: number };
+            metadata?: { size?: number; eTag?: string };
           }[];
           for (const row of rows) {
             if (row.id === null) continue; // a folder, not an object
@@ -130,6 +139,7 @@ export function supabaseRemote({ url, anonKey, bucket }: SupabaseSettings): Remo
               name: prefix + row.name,
               version: `${row.updated_at ?? ""}:${row.metadata?.size ?? ""}`,
               size: row.metadata?.size ?? 0,
+              etag: row.metadata?.eTag,
             });
           }
           if (rows.length < 1000) return out;
@@ -137,12 +147,23 @@ export function supabaseRemote({ url, anonKey, bucket }: SupabaseSettings): Remo
       };
       return [...(await page("")), ...(await page(QUESTION_PREFIX))];
     },
-    async get(name) {
-      const response = await fetch(
-        `${url}/storage/v1/object/${bucket}/${encodePath(name)}`,
-        { headers },
-      );
+    async get(file) {
+      // Downloads go through a CDN that keeps serving the previous copy for a
+      // few seconds after a file is rewritten, but listing does not — so a pull
+      // just after an edit would see the new version listed, fetch the old body,
+      // and record that version as read, losing the edit here for good. The CDN
+      // ignores query strings, so the fix can't be a cache-busting URL; instead
+      // the served ETag must match the listed one, and a stale body is refused
+      // and left for the next pass.
+      const response = await fetch(`${url}/storage/v1/object/${bucket}/${encodePath(file.name)}`, {
+        headers,
+        cache: "no-store",
+      });
       await check(response, "download");
+      const served = response.headers.get("etag");
+      if (file.etag && served && !sameEtag(file.etag, served)) {
+        throw new RemoteError(`${file.name} is still being served from cache; retrying next pass.`);
+      }
       return response.text();
     },
     async put(name, contents) {
