@@ -1,0 +1,64 @@
+# Nightly database backup. Supabase's free plan keeps no backups of its own.
+#
+# The dump is encrypted before it's stored: this repository is public, and
+# workflow artifacts on public repositories can be downloaded by any GitHub user.
+# Without BACKUP_PASSPHRASE the file is useless.
+#
+# Repository secrets (Settings -> Secrets and variables -> Actions):
+#   BACKUP_DATABASE_URL  Supabase "Session pooler" connection string (port 5432),
+#                        not the transaction pooler: pg_dump needs a session.
+#   BACKUP_PASSPHRASE    a long random passphrase; keep a copy somewhere safe.
+#
+# Restore: download the artifact, then
+#   gpg --decrypt db.dump.gpg > db.dump
+#   pg_restore --no-owner --no-privileges -d "$TARGET_DATABASE_URL" db.dump
+name: Nightly database backup
+
+on:
+  schedule:
+    - cron: "30 20 * * *" # 02:30 in Dhaka
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check secrets
+        env:
+          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          if [ -z "$DATABASE_URL" ] || [ -z "$PASSPHRASE" ]; then
+            echo "::error::Set BACKUP_DATABASE_URL and BACKUP_PASSPHRASE in the repository secrets."
+            exit 1
+          fi
+
+      - name: Install pg_dump 17 (matches Supabase's Postgres)
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+
+      - name: Dump and encrypt
+        env:
+          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          /usr/lib/postgresql/17/bin/pg_dump "$DATABASE_URL" --schema=public --no-owner --no-privileges -Fc -f db.dump
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$PASSPHRASE" \
+            --symmetric --cipher-algo AES256 -o db.dump.gpg db.dump
+          rm db.dump
+          ls -l db.dump.gpg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ github.run_id }}
+          path: db.dump.gpg
+          retention-days: 30
+          if-no-files-found: error
