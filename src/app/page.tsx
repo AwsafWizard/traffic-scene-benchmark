@@ -1,107 +1,92 @@
 import Link from "next/link";
-import { getDb } from "@/lib/db";
-import { requireBenchmarkerPage } from "@/lib/session";
-import TypeBadges from "./TypeBadges";
-import type { Question } from "@/lib/types";
-
-export const dynamic = "force-dynamic";
-
-type Row = Question & { human_count: number; run_count: number };
+import { requireAnnotator } from "@/server/auth";
+import { myQueue } from "@/server/checks";
+import { sql } from "@/server/db";
+import { myTopics } from "@/server/questions";
+import { Notice, PageHeader, Progress, StatusBadge } from "./ui/components";
+import { button, buttonSecondary, card } from "./ui/styles";
 
 export default async function Home() {
-  await requireBenchmarkerPage();
-  const unclassified = (
-    getDb()
-      .prepare("SELECT COUNT(*) AS n FROM questions WHERE type_code IS NULL")
-      .get() as { n: number }
-  ).n;
-
-  const rows = getDb()
-    .prepare(
-      `SELECT q.*,
-        (SELECT COUNT(*) FROM human_responses h WHERE h.question_id = q.id) AS human_count,
-        (SELECT COUNT(*) FROM llm_runs r WHERE r.question_id = q.id AND r.error IS NULL) AS run_count
-       FROM questions q ORDER BY q.id DESC`,
-    )
-    .all() as Row[];
-
-  if (rows.length === 0) {
-    return (
-      <div className="rounded-xl border border-line bg-surface p-10 text-center">
-        <h1 className="text-lg font-semibold">No questions yet</h1>
-        <p className="mt-2 text-sm text-muted">
-          Start by uploading a traffic scene and writing a question about it.
-        </p>
-        <Link
-          href="/setter"
-          className="mt-6 inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-white"
-        >
-          Add the first question
-        </Link>
-      </div>
-    );
-  }
+  const user = await requireAnnotator();
+  const { sprint, topics } = await myTopics(user.id);
+  const queue = sprint?.status === "verifying" ? await myQueue(user.id) : null;
+  const [{ returned }] = await sql<{ returned: number }[]>`
+    select count(*)::int as returned from questions where author_id = ${user.id} and status = 'returned'`;
 
   return (
     <div className="space-y-6">
-      <div className="flex items-baseline justify-between">
-        <h1 className="text-xl font-semibold">Questions</h1>
-        <span className="text-sm text-muted">{rows.length} total</span>
-      </div>
+      <PageHeader
+        title={`Hello, ${user.display_name}`}
+        sub={sprint ? <>Current sprint: <b>{sprint.name}</b> <StatusBadge status={sprint.status} /></> : undefined}
+      />
 
-      {unclassified > 0 && (
-        <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-600">
-          {unclassified} question{unclassified === 1 ? "" : "s"} predate the taxonomy and have no
-          fine-grained type.{" "}
-          <Link href="/classify" className="underline">
-            Classify them
-          </Link>{" "}
-          — they keep working either way, but they won&apos;t appear in the per-dimension results.
-        </p>
+      {returned > 0 && (
+        <Notice tone="warn">
+          The admin sent back {returned} of your questions to fix.{" "}
+          <Link href="/questions?status=returned" className="underline">
+            See what to change
+          </Link>
+        </Notice>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {rows.map((q) => (
-          <div
-            key={q.id}
-            className="flex flex-col overflow-hidden rounded-xl border border-line bg-surface"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={`/api/image/${q.image_path}`}
-              alt=""
-              className="h-40 w-full object-cover"
-            />
-            <div className="flex flex-1 flex-col gap-3 p-4">
-              <TypeBadges question={q} />
-              <p className="flex-1 text-sm leading-relaxed">{q.prompt}</p>
-              <div className="text-xs text-muted">
-                {q.human_count} human {q.human_count === 1 ? "answer" : "answers"} ·{" "}
-                {q.run_count} model {q.run_count === 1 ? "run" : "runs"}
-              </div>
-              <div className="flex gap-2 text-sm">
-                <Link
-                  href={`/ground/${q.id}`}
-                  className="rounded-md border border-line px-3 py-1.5 transition hover:bg-background"
-                >
-                  Answer
-                </Link>
-                <Link
-                  href={`/reveal/${q.id}`}
-                  className="rounded-md border border-line px-3 py-1.5 transition hover:bg-background"
-                >
-                  Compare
-                </Link>
-                <Link
-                  href={`/edit/${q.id}`}
-                  className="rounded-md border border-line px-3 py-1.5 transition hover:bg-background"
-                >
-                  Edit
-                </Link>
-              </div>
+      {!sprint && <Notice>No sprint is running right now. Your admin will start one.</Notice>}
+
+      {sprint?.status === "writing" && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Your topics</h2>
+          {topics.length === 0 ? (
+            <Notice>You don&apos;t have a topic in this sprint yet.</Notice>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {topics.map((t) => (
+                <div key={t.id} className={`${card} space-y-3 p-4`}>
+                  <div>
+                    <div className="text-xs text-muted">Type {t.category_code}</div>
+                    <div className="font-medium">
+                      {t.subtype_id ? `${t.subtype_code} ${t.subtype_name}` : `${t.category_code}. ${t.category_name} (whole type)`}
+                    </div>
+                  </div>
+                  <Progress value={t.written} max={t.target} />
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted">
+                      {t.written} of {t.target} written
+                    </span>
+                    <Link href={`/write?topic=${t.id}`} className={button}>
+                      Write
+                    </Link>
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
-        ))}
+          )}
+        </section>
+      )}
+
+      {sprint?.status === "verifying" && queue && (
+        <section className={`${card} space-y-3 p-5`}>
+          <h2 className="font-medium">Checking</h2>
+          {queue.todo.length === 0 ? (
+            <p className="text-sm text-muted">
+              {queue.done > 0 ? `All done — you've checked ${queue.done} questions. Thanks!` : "Nothing to check right now."}
+            </p>
+          ) : (
+            <>
+              <p className="text-sm text-muted">
+                {queue.todo.length} to go · {queue.done} done
+              </p>
+              <Progress value={queue.done} max={queue.done + queue.todo.length} />
+              <Link href={`/check/${queue.todo[0].check_id}`} className={button}>
+                {queue.done === 0 ? "Start checking" : "Continue"}
+              </Link>
+            </>
+          )}
+        </section>
+      )}
+
+      <div className="flex gap-2">
+        <Link href="/questions" className={buttonSecondary}>
+          My questions
+        </Link>
       </div>
     </div>
   );

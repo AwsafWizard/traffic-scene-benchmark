@@ -15,7 +15,6 @@
 
 # next.js
 /.next/
-/.next-partner/
 /out/
 
 # production
@@ -41,9 +40,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# local data (sqlite db + uploaded images)
+# local development database and image storage
+/.pgdata
+/.uploads
+# data from the old single-machine version of the app
 /data
-# the second copy used to test the partner side (npm run dev:partner)
 /data-partner
 .env
 .env.local
