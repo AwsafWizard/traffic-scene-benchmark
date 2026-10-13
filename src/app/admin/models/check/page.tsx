@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { requireAdmin } from "@/server/auth";
 import { sql } from "@/server/db";
-import { apiAvailable, listModels } from "@/server/models";
-import { runModelBatchAction } from "../../../actions/admin";
+import { listModels, modelSpend } from "@/server/models";
 import { Notice, PageHeader, pct, StatusBadge } from "../../../ui/components";
-import SubmitButton from "../../../ui/SubmitButton";
-import { buttonSecondary, card, td, th } from "../../../ui/styles";
-import ActionForm from "../../ActionForm";
+import { card, td, th } from "../../../ui/styles";
 import { resolveScope, ScopePicker } from "../../scope";
+import Runner from "./Runner";
+
+// Server actions started from this page may wait on a slow model.
+export const maxDuration = 300;
 
 interface SampleRow {
   id: string;
@@ -21,7 +22,7 @@ interface SampleRow {
 export default async function ModelCheckPage({ searchParams }: PageProps<"/admin/models/check">) {
   await requireAdmin();
   const { sprints, sprintId, value } = await resolveScope((await searchParams).sprint);
-  const models = await listModels({ activeOnly: true });
+  const [models, spend] = await Promise.all([listModels({ activeOnly: true }), modelSpend()]);
 
   if (!sprintId) {
     return (
@@ -67,14 +68,16 @@ export default async function ModelCheckPage({ searchParams }: PageProps<"/admin
                   <div className="text-sm">
                     Matches the setter on <b>{pct(correct, answered.length)}</b> <span className="text-muted">({correct}/{answered.length} answered)</span>
                   </div>
-                  {apiAvailable(m.provider) && missing.length > 0 && (
-                    <ActionForm action={runModelBatchAction}>
-                      <input type="hidden" name="model_id" value={m.id} />
-                      <input type="hidden" name="question_ids" value={missing.join(",")} />
-                      <SubmitButton className={buttonSecondary} pending="Asking… (up to 10 at a time)">
-                        Ask the next {Math.min(10, missing.length)} of {missing.length} by API
-                      </SubmitButton>
-                    </ActionForm>
+                  {spend.get(m.id) && (
+                    <div className="text-xs text-muted">
+                      {spend.get(m.id)!.calls} API calls · {(spend.get(m.id)!.tokensIn / 1000).toFixed(0)}k in / {(spend.get(m.id)!.tokensOut / 1000).toFixed(0)}k out
+                      {spend.get(m.id)!.dollars !== null && ` · ≈ $${spend.get(m.id)!.dollars!.toFixed(2)}`}
+                    </div>
+                  )}
+                  {m.api_ready ? (
+                    <Runner modelId={m.id} questionIds={missing} />
+                  ) : (
+                    <p className="text-xs text-muted">No API connection: record answers by hand from each question&apos;s page.</p>
                   )}
                 </div>
               );

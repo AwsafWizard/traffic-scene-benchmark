@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAdmin } from "@/server/auth";
 import { FLAG_LABEL, type FlagReason } from "@/server/engine";
-import { apiAvailable, buildPrompt, listModels, newOrder } from "@/server/models";
+import { buildPrompt, listModels, newOrder } from "@/server/models";
 import { imageSrc } from "@/server/storage";
 import { questionDetail } from "@/server/stats";
 import { manualModelAnswerAction, reviewAction, runModelAction } from "../../../actions/admin";
@@ -11,6 +11,9 @@ import SubmitButton from "../../../ui/SubmitButton";
 import ZoomImage from "../../../ui/ZoomImage";
 import { buttonDanger, buttonSecondary, card, input, label, select, td, th } from "../../../ui/styles";
 import ActionForm from "../../ActionForm";
+
+// Server actions started from this page may wait on a slow model.
+export const maxDuration = 300;
 
 const ROLE = { v: "Checker", c: "Blind checker", second: "Second", third: "Third" } as Record<string, string>;
 const JUDGMENT: Record<string, string> = {
@@ -222,11 +225,11 @@ export default async function AdminQuestionPage({ params }: PageProps<"/admin/qu
             <p className="text-sm text-muted">Add models on the <Link href="/admin/models" className="underline">Models</Link> page first.</p>
           ) : (
             <>
-              {models.some((m) => apiAvailable(m.provider)) && (
+              {models.some((m) => m.api_ready) && (
                 <ActionForm action={runModelAction} className="flex flex-wrap items-center gap-2">
                   <input type="hidden" name="question_id" value={q.id} />
                   <select name="model_id" className={`${select} max-w-xs`} aria-label="Model">
-                    {models.filter((m) => apiAvailable(m.provider)).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    {models.filter((m) => m.api_ready).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                   </select>
                   <SubmitButton className={buttonSecondary} pending="Asking the model…">Ask by API</SubmitButton>
                 </ActionForm>

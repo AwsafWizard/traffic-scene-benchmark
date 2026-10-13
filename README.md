@@ -31,12 +31,28 @@ There is no sign-up and annotators can't change their own password. A new passwo
    | **I** inferential | 2, in turn | **second** sees the setter's answer and agrees or disagrees; **third** sees both and says whether all three agree | both say yes |
 
    Anything else is **flagged** for the admin. Every checking screen also offers *None of these is correct* and *Can't tell from the image*, and options are shuffled for every checker and model.
-5. **Model check** — the admin draws a sample (10% by default, at least one per subtype) and gets model answers by API or pastes them in.
+5. **Model check** — the admin draws a sample (10% by default, at least one per subtype) and gets model answers by API or records them by hand (see [Models](#models)).
 6. **Review and close** — the admin accepts, fixes, sends back or drops flagged questions, closes the sprint and exports.
 
 ### Taxonomy
 
 8 types and 41 subtypes, seeded from the team's category list (`db/migrations/0002_seed_taxonomy.sql`). The admin edits everything on the Taxonomy page: types, subtypes, their verifiability, and scene tag groups. A question keeps the verifiability it was written with, so editing a subtype never changes how existing questions are checked. Anything already used can be hidden but not deleted. All questions are multiple choice.
+
+### Models
+
+The Models page holds the proposal's catalogue: 74 models (35 proprietary, 32 open-weight, 7 driving-specific), 29 of them funded, with their prices. Everything about them is editable.
+
+A model is **asked by API** when it's linked to an **API connection** and has its provider model ID; any other model is **answered by hand** (run it anywhere, record the letter it chose). Connections come in three types:
+
+| Type | Covers |
+| --- | --- |
+| Anthropic | Claude models, through the official SDK |
+| Google Gemini | Gemini models |
+| OpenAI-compatible | OpenAI, xAI, Mistral, Alibaba (Qwen), Moonshot (Kimi), Z.ai (GLM), DeepSeek, ByteDance, Baidu, Cohere, OpenRouter — and open-weight models you serve yourself on a GPU with vLLM, SGLang or Ollama |
+
+The admin adds a connection with its API key; the key is encrypted with `ENCRYPTION_KEY` and never shown again. "Test key and list model IDs" checks it and lists the exact IDs to paste into each model. Per-model request options (JSON, e.g. `{"reasoning_effort": "high"}`) are merged into every request so settings stay fixed across the run; they can't change the model, prompt or image. Every API answer records its option order, tokens and time, and the Models page shows spend per model against the listed prices.
+
+On the model check page, each API model has a runner that asks every unanswered sample question from the browser, three at a time. Each request is a single question, so slow models never hit Vercel's time limit, and stopping or closing the tab simply stops the run.
 
 ---
 
@@ -96,7 +112,7 @@ Import the GitHub repository. Under **Settings → Environment Variables**, set:
 | `ADMIN_USERNAME` | the admin's username, e.g. `admin` |
 | `ADMIN_PASSWORD` | the admin's first password (10+ characters) |
 | `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | from Cloudinary |
-| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | optional, for running the model check by API |
+| `ENCRYPTION_KEY` | 32 random bytes, base64 (command in `.env.example`); encrypts the provider API keys added on the Models page |
 
 The build runs the database migrations first (`npm run build`), so every deploy brings the schema up to date, and the first one creates the admin account. Under **Settings → Functions**, set the region closest to the Supabase project's region, since every page makes several database queries.
 

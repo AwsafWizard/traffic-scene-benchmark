@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { audit } from "@/server/audit";
 import { actionUser, AuthError } from "@/server/auth";
 import { sql } from "@/server/db";
+import { deleteConnection, listRemoteModels, saveConnection } from "@/server/connections";
 import { recordManualAnswer, runModelApi, saveModel } from "@/server/models";
 import { reviewQuestion, type ReviewAction } from "@/server/questions";
 import {
@@ -278,7 +279,13 @@ export async function saveModelAction(_prev: AdminState, form: FormData): Promis
       id: num(form, "id") || undefined,
       name: text(form, "name"),
       provider: text(form, "provider"),
+      family: text(form, "family"),
+      funded: flag(form, "funded"),
       model_id: text(form, "model_id"),
+      connection_id: num(form, "connection_id") || null,
+      price_in: text(form, "price_in"),
+      price_out: text(form, "price_out"),
+      request_options: text(form, "request_options"),
       notes: text(form, "notes"),
       active: flag(form, "active"),
     });
@@ -286,6 +293,40 @@ export async function saveModelAction(_prev: AdminState, form: FormData): Promis
     revalidatePath("/admin/models");
     return { ok: "Saved." };
   });
+}
+
+export async function saveConnectionAction(_prev: AdminState, form: FormData): Promise<AdminState> {
+  return guarded(async () => {
+    const me = await admin();
+    const result = await saveConnection(me.id, {
+      id: num(form, "id") || undefined,
+      name: text(form, "name"),
+      kind: text(form, "kind"),
+      base_url: text(form, "base_url"),
+      api_key: text(form, "api_key"),
+      active: flag(form, "active"),
+      clear_key: flag(form, "clear_key"),
+    });
+    if (!result.ok) return { error: result.error };
+    revalidatePath("/admin/models");
+    return { ok: "Saved. The key is stored encrypted and won't be shown again." };
+  });
+}
+
+export async function deleteConnectionAction(form: FormData): Promise<void> {
+  const me = await admin();
+  await deleteConnection(me.id, num(form, "id"));
+  revalidatePath("/admin/models");
+}
+
+/** Checks a connection's key and returns the model IDs it can use. */
+export async function listRemoteModelsAction(connectionId: number): Promise<{ ok: true; ids: string[] } | { ok: false; error: string }> {
+  try {
+    await admin();
+    return await listRemoteModels(Number(connectionId));
+  } catch (error) {
+    return { ok: false, error: error instanceof AuthError ? error.message : "Couldn't reach the provider." };
+  }
 }
 
 export async function manualModelAnswerAction(_prev: AdminState, form: FormData): Promise<AdminState> {
@@ -312,17 +353,13 @@ export async function runModelAction(_prev: AdminState, form: FormData): Promise
   });
 }
 
-/** Runs one model over every sample question it hasn't answered yet, a few at a time. */
-export async function runModelBatchAction(_prev: AdminState, form: FormData): Promise<AdminState> {
-  return guarded(async () => {
+/** One model, one question: the client-side runner calls this repeatedly, so no request runs long. */
+export async function runOneAction(questionId: string, modelId: number): Promise<{ ok: boolean; error?: string }> {
+  try {
     const me = await admin();
-    const ids = text(form, "question_ids").split(",").filter(Boolean).slice(0, 10);
-    let failed = 0;
-    for (const id of ids) {
-      const result = await runModelApi(me.id, id, num(form, "model_id"));
-      if (!result.ok) failed++;
-    }
-    revalidatePath("/admin/models/check");
-    return failed ? { error: `${ids.length - failed} answered, ${failed} failed (see each question).` } : { ok: `${ids.length} answered.` };
-  });
+    const result = await runModelApi(me.id, String(questionId), Number(modelId));
+    return result.ok ? { ok: true } : { ok: false, error: result.error };
+  } catch (error) {
+    return { ok: false, error: error instanceof AuthError ? error.message : "Request failed" };
+  }
 }
