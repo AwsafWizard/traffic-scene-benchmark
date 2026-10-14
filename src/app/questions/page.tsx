@@ -38,9 +38,8 @@ export default async function MyQuestionsPage({ searchParams }: PageProps<"/ques
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
                     <StatusBadge status={q.status} />
                     <VBadge v={q.verifiability} />
-                    <span>
-                      {q.subtype_code} {q.subtype_name}
-                    </span>
+                    <span className="font-mono text-foreground">{q.code}</span>
+                    <span>{q.subtype_name}</span>
                     <span>· {q.sprint_name}</span>
                   </div>
                   <p className="text-sm">{q.prompt}</p>

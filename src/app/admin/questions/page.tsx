@@ -70,7 +70,7 @@ export default async function AdminQuestionsPage({ searchParams }: PageProps<"/a
           {annotators.map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}
         </select>
         <div className="flex gap-2">
-          <input name="q" defaultValue={search} placeholder="Search text" className={input} />
+          <input name="q" defaultValue={search} placeholder="Code or text" className={input} />
           <button type="submit" className={buttonSecondary}>Filter</button>
         </div>
       </form>
@@ -86,7 +86,7 @@ export default async function AdminQuestionsPage({ searchParams }: PageProps<"/a
                 <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
                   <StatusBadge status={q.status} />
                   <VBadge v={q.verifiability} />
-                  <span>{q.subtype_code}</span>
+                  <span className="font-mono text-foreground">{q.code}</span>
                   <span>· {q.author_name}</span>
                   <span>· {q.sprint_name}</span>
                   {q.checks_total > 0 && <span>· checks {q.checks_done}/{q.checks_total}</span>}

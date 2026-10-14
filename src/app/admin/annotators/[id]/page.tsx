@@ -37,7 +37,7 @@ export default async function AnnotatorPage({ params, searchParams }: PageProps<
     <div className="space-y-6">
       <PageHeader
         title={person.display_name}
-        sub={<>@{person.username} · {person.active ? "active" : "revoked"} · last sign-in {person.last_login_at ? person.last_login_at.toLocaleString() : "never"}</>}
+        sub={<>{person.number !== null && <>Setter {String(person.number).padStart(2, "0")} · </>}@{person.username} · {person.active ? "active" : "revoked"} · last sign-in {person.last_login_at ? person.last_login_at.toLocaleString() : "never"}</>}
         actions={<ScopePicker path={`/admin/annotators/${id}`} sprints={sprints} value={value} />}
       />
 

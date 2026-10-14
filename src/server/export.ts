@@ -15,7 +15,7 @@ export interface ExportFilters {
 
 export async function exportRecords(f: ExportFilters) {
   const questions = await sql`
-    select q.id, q.prompt, q.options, q.correct_option, q.status, q.resolution, q.admin_note, q.verifiability,
+    select q.id, q.code, q.prompt, q.options, q.correct_option, q.status, q.resolution, q.admin_note, q.verifiability,
       q.created_at, s.name as sprint, c.code as category_code, c.name as category_name,
       st.code as subtype_code, st.name as subtype_name, u.username as setter,
       i.id as image_id, i.storage, i.storage_key, i.version, i.width, i.height
@@ -23,7 +23,7 @@ export async function exportRecords(f: ExportFilters) {
     join categories c on c.id = st.category_id join users u on u.id = q.author_id join images i on i.id = q.image_id
     where ${f.sprintId ? sql`q.sprint_id = ${f.sprintId}` : sql`true`}
       and ${f.status ? sql`q.status = ${f.status}` : sql`q.status <> 'dropped'`}
-    order by c.sort, st.sort, q.created_at`;
+    order by c.sort, st.sort, q.code`;
   const ids = questions.map((q) => q.id as string);
   if (ids.length === 0) return [];
 
@@ -48,6 +48,7 @@ export async function exportRecords(f: ExportFilters) {
     for (const t of tags.filter((t) => t.question_id === q.id)) (tagMap[t.group] ??= []).push(t.tag);
     return {
       id: q.id as string,
+      code: q.code as string,
       sprint: q.sprint as string,
       category: { code: q.category_code as string, name: q.category_name as string },
       subtype: { code: q.subtype_code as string, name: q.subtype_name as string },
@@ -104,7 +105,7 @@ function csvCell(value: unknown): string {
 
 export function toCsv(records: Record_[]): string {
   const header = [
-    "id", "sprint", "category", "subtype_code", "subtype", "verifiability", "status", "resolution",
+    "code", "id", "sprint", "category", "subtype_code", "subtype", "verifiability", "status", "resolution",
     "question", "options", "answer", "setter", "image_url", "tags",
     "check1_checker", "check1_role", "check1_blind", "check1_judgment", "check1_reason",
     "check2_checker", "check2_role", "check2_blind", "check2_judgment", "check2_reason",
@@ -118,7 +119,7 @@ export function toCsv(records: Record_[]): string {
     };
     lines.push(
       [
-        r.id, r.sprint, `${r.category.code}. ${r.category.name}`, r.subtype.code, r.subtype.name, r.verifiability,
+        r.code, r.id, r.sprint, `${r.category.code}. ${r.category.name}`, r.subtype.code, r.subtype.name, r.verifiability,
         r.status, r.resolution, r.question, r.options.join(" | "), r.answer, r.setter, r.image.url,
         Object.entries(r.tags).map(([g, t]) => `${g}: ${t.join(", ")}`).join("; "),
         ...check(0), ...check(1),

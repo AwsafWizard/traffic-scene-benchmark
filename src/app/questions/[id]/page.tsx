@@ -47,7 +47,10 @@ export default async function EditQuestionPage({ params }: PageProps<"/questions
 
   return (
     <div className="space-y-6">
-      <PageHeader title={question.status === "returned" ? "Fix this question" : "Edit question"} />
+      <PageHeader
+        title={question.status === "returned" ? "Fix this question" : "Edit question"}
+        sub={<span className="font-mono">{question.code}</span>}
+      />
       {question.status === "returned" && question.admin_note && (
         <Notice tone="warn">
           <b>The admin says:</b> {question.admin_note}

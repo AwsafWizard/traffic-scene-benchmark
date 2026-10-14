@@ -178,6 +178,7 @@ async function agreementStats(sprintId: number | null): Promise<AgreementStats> 
 
 export interface AnnotatorRow {
   id: string;
+  number: number | null;
   display_name: string;
   username: string;
   active: boolean;
@@ -194,7 +195,7 @@ export interface AnnotatorRow {
 export async function annotatorTable(sprintId: number | null): Promise<AnnotatorRow[]> {
   const where = scope(sprintId);
   return sql<AnnotatorRow[]>`
-    select u.id, u.display_name, u.username, u.active,
+    select u.id, u.number, u.display_name, u.username, u.active,
       coalesce(w.written, 0)::int as written, coalesce(w.accepted, 0)::int as accepted, coalesce(w.flagged, 0)::int as flagged,
       coalesce(k.total, 0)::int as checks_total, coalesce(k.done, 0)::int as checks_done,
       coalesce(k.blind, 0)::int as blind_answers, coalesce(k.matches, 0)::int as blind_matches, k.avg_seconds
@@ -268,6 +269,7 @@ export async function annotatorDetail(userId: string, sprintId: number | null): 
 
 export interface QuestionDetail {
   id: string;
+  code: string;
   prompt: string;
   options: Option[];
   correct_option: string;

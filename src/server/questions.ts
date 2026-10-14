@@ -144,6 +144,7 @@ export async function resubmitQuestion(userId: string, questionId: string): Prom
 
 export interface MyQuestion {
   id: string;
+  code: string;
   prompt: string;
   status: string;
   admin_note: string | null;
@@ -158,7 +159,7 @@ export interface MyQuestion {
 
 export async function listMyQuestions(userId: string): Promise<MyQuestion[]> {
   const rows = await sql`
-    select q.id, q.prompt, q.status, q.admin_note, st.code as subtype_code, st.name as subtype_name,
+    select q.id, q.code, q.prompt, q.status, q.admin_note, st.code as subtype_code, st.name as subtype_name,
       q.verifiability, s.name as sprint_name, s.status as sprint_status, q.created_at,
       i.id as image_id, i.storage, i.storage_key, i.version
     from questions q join subtypes st on st.id = q.subtype_id join sprints s on s.id = q.sprint_id
@@ -172,6 +173,7 @@ export async function listMyQuestions(userId: string): Promise<MyQuestion[]> {
 
 export interface QuestionRecord {
   id: string;
+  code: string;
   sprint_id: number;
   assignment_id: number;
   author_id: string;
@@ -291,6 +293,7 @@ export async function reviewQuestion(
 
 export interface AdminQuestionRow {
   id: string;
+  code: string;
   prompt: string;
   status: string;
   resolution: string | null;
@@ -316,6 +319,13 @@ export interface AdminQuestionFilters {
 
 export const ADMIN_PAGE_SIZE = 50;
 
+/** Search text matches a question code (or its start, like "07-1.4") or words in the question. */
+function searchMatch(search: string) {
+  const term = search.trim();
+  const like = term.replace(/[%_\\]/g, "\\$&");
+  return sql`(q.code ilike ${like + "%"} or q.prompt ilike ${"%" + like + "%"})`;
+}
+
 export async function adminListQuestions(f: AdminQuestionFilters): Promise<{ rows: AdminQuestionRow[]; total: number }> {
   const where = sql`
     ${f.sprintId ? sql`q.sprint_id = ${f.sprintId}` : sql`true`}
@@ -323,11 +333,11 @@ export async function adminListQuestions(f: AdminQuestionFilters): Promise<{ row
     and ${f.subtypeId ? sql`q.subtype_id = ${f.subtypeId}` : sql`true`}
     and ${f.verifiability ? sql`q.verifiability = ${f.verifiability}` : sql`true`}
     and ${f.authorId ? sql`q.author_id = ${f.authorId}` : sql`true`}
-    and ${f.search ? sql`q.prompt ilike ${"%" + f.search.replace(/[%_\\]/g, "\\$&") + "%"}` : sql`true`}`;
+    and ${f.search ? searchMatch(f.search) : sql`true`}`;
   const [{ total }] = await sql<{ total: number }[]>`select count(*)::int as total from questions q where ${where}`;
   const page = Math.max(1, f.page ?? 1);
   const rows = await sql`
-    select q.id, q.prompt, q.status, q.resolution, q.verifiability, st.code as subtype_code,
+    select q.id, q.code, q.prompt, q.status, q.resolution, q.verifiability, st.code as subtype_code,
       u.display_name as author_name, s.name as sprint_name, q.created_at,
       i.id as image_id, i.storage, i.storage_key, i.version,
       (select count(*)::int from checks c where c.question_id = q.id and c.blind_choice is not null) as checks_done,

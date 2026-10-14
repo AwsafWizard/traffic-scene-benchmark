@@ -173,9 +173,9 @@ export async function moveQuestionAction(_prev: AdminState, form: FormData): Pro
     const subtypeId = num(form, "subtype_id");
     const result = await moveQuestionToSubtype(id, subtypeId);
     if (!result.ok) return { error: result.error };
-    await audit(me.id, "question.move", id, { subtype_id: subtypeId });
+    await audit(me.id, "question.move", id, { subtype_id: subtypeId, from: result.from, to: result.to });
     revalidatePath(`/admin/questions/${id}`);
-    return { ok: "Moved." };
+    return { ok: result.from === result.to ? "Moved." : `Moved. Its code is now ${result.to} (was ${result.from}).` };
   });
 }
 

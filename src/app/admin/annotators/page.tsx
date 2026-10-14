@@ -59,6 +59,7 @@ export default async function AnnotatorsPage({ searchParams }: PageProps<"/admin
             {rows.map((r) => (
               <tr key={r.id} className={r.active ? "" : "opacity-50"}>
                 <td className={td}>
+                  {r.number !== null && <span className="mr-2 font-mono text-xs text-muted">{String(r.number).padStart(2, "0")}</span>}
                   <Link href={`/admin/annotators/${r.id}?sprint=${value}`} className="font-medium hover:underline">
                     {r.display_name}
                   </Link>

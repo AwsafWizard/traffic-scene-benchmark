@@ -59,6 +59,7 @@ async function migrate() {
       if exists (select 1 from pg_roles where rolname = 'anon') then
         execute 'revoke all on all tables in schema public from anon, authenticated';
         execute 'revoke all on all sequences in schema public from anon, authenticated';
+        execute 'revoke all on all functions in schema public from anon, authenticated';
       end if;
     end $$;
   `);

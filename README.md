@@ -34,6 +34,10 @@ There is no sign-up and annotators can't change their own password. A new passwo
 5. **Model check** — the admin draws a sample (10% by default, at least one per subtype) and gets model answers by API or records them by hand (see [Models](#models)).
 6. **Review and close** — the admin accepts, fixes, sends back or drops flagged questions, closes the sprint and exports.
 
+### Question codes
+
+Every question has a code like `07-1.4-003`: setter **07** (annotators are numbered in the order they were created, shown on the Annotators page), subtype **1.4**, and that setter's **3rd** question in the subtype. The database assigns it, so codes never repeat, even after a question is deleted. Moving a question to another subtype gives it a new code (the old one is kept in its history); a question whose subtype is deleted keeps its code while it waits in Uncategorised. The admin's question search accepts a code or the start of one (`07-1.4`). Checkers never see codes, since they name the setter.
+
 ### Taxonomy
 
 8 types and 41 subtypes, seeded from the team's category list (`db/migrations/0002_seed_taxonomy.sql`). The admin edits everything on the Taxonomy page: types, subtypes, their verifiability, and scene tag groups. A question keeps the verifiability it was written with, so editing a subtype never changes how existing questions are checked. Hiding a subtype keeps it out of annotators' way; deleting one moves its questions (and any topic assigned to it) to a built-in **Uncategorised** type, where each question remembers its old subtype until the admin files it under a new one from the question's page. A type can be deleted once its subtypes are gone. All questions are multiple choice.

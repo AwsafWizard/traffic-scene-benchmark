@@ -73,7 +73,7 @@ export default async function AdminQuestionPage({ params }: PageProps<"/admin/qu
 
       <div className="space-y-5">
         <PageHeader
-          title="Question"
+          title={`Question ${q.code}`}
           sub={
             <span className="flex flex-wrap items-center gap-2">
               <StatusBadge status={q.status} /> <VBadge v={q.verifiability} long /> {q.subtype} · by{" "}
@@ -123,6 +123,7 @@ export default async function AdminQuestionPage({ params }: PageProps<"/admin/qu
             </select>
             <SubmitButton className={buttonSecondary}>Move</SubmitButton>
             <p className="w-full text-xs text-muted">
+              It gets a new code for that subtype.{" "}
               {q.status === "written"
                 ? "It takes the new subtype's verifiability."
                 : `It keeps the verifiability it was checked under (${q.verifiability}).`}

@@ -152,6 +152,13 @@ describe.skipIf(!reachable)("sprint workflow", () => {
       }
     }
 
+    // Codes: setter number, subtype, then the setter's count in that subtype.
+    const codes = await m.sql<{ id: string; code: string }[]>`select id, code from questions`;
+    const codeOf = (id: string) => codes.find((c) => c.id === id)?.code;
+    expect(codeOf(question.ann1)).toBe("01-1.1-001");
+    expect(codeOf(question.ann2)).toBe("01-1.1-002");
+    expect(codeOf(question.dan2)).toBe("04-8.1-002");
+
     // Someone else's topic, a wrong subtype, someone else's image.
     const { topics: annTopics } = await m.questions.myTopics(ids.ann);
     expect((await m.questions.createQuestion(ids.bob, annTopics[0].id, {
@@ -357,6 +364,8 @@ describe.skipIf(!reachable)("sprint workflow", () => {
     const moved = await m.sql<{ subtype_id: number; former_subtype: string; verifiability: string }[]>`
       select subtype_id, former_subtype, verifiability from questions where id in ${m.sql([question.dan1, question.dan2])}`;
     expect(moved.every((q) => q.subtype_id === u.id && q.former_subtype.startsWith("8.1 "))).toBe(true);
+    const [kept] = await m.sql<{ code: string }[]>`select code from questions where id = ${question.dan1}`;
+    expect(kept.code).toBe("04-8.1-001");
     const [topic] = await m.sql<{ category_id: number; subtype_id: number }[]>`
       select category_id, subtype_id from assignments where annotator_id = ${ids.dan} and sprint_id = ${sprintId}`;
     expect(topic).toEqual({ category_id: u.category_id, subtype_id: u.id });
@@ -366,7 +375,7 @@ describe.skipIf(!reachable)("sprint workflow", () => {
     expect((await m.taxonomy.deleteCategory(u.category_id)).ok).toBe(false);
 
     // Checked questions keep the verifiability they were checked under.
-    expect(await m.taxonomy.moveQuestionToSubtype(question.dan1, subtype["8.2"])).toEqual({ ok: true });
+    expect(await m.taxonomy.moveQuestionToSubtype(question.dan1, subtype["8.2"])).toEqual({ ok: true, from: "04-8.1-001", to: "04-8.2-001" });
     const [filed] = await m.sql<{ subtype_id: number; former_subtype: string | null; verifiability: string }[]>`
       select subtype_id, former_subtype, verifiability from questions where id = ${question.dan1}`;
     expect(filed).toEqual({ subtype_id: subtype["8.2"], former_subtype: null, verifiability: moved[0].verifiability });

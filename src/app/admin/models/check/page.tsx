@@ -12,6 +12,7 @@ export const maxDuration = 300;
 
 interface SampleRow {
   id: string;
+  code: string;
   prompt: string;
   status: string;
   subtype: string;
@@ -35,7 +36,7 @@ export default async function ModelCheckPage({ searchParams }: PageProps<"/admin
 
   // Each sample question with the latest answer per model (null = an error was recorded).
   const rows = await sql<SampleRow[]>`
-    select q.id, q.prompt, q.status, st.code as subtype, q.correct_option,
+    select q.id, q.code, q.prompt, q.status, st.code as subtype, q.correct_option,
       (select jsonb_object_agg(a.model_id::text, a.chosen_option) from (
         select distinct on (model_id) model_id, chosen_option from model_answers
         where question_id = q.id order by model_id, created_at desc) a) as answers
@@ -98,7 +99,7 @@ export default async function ModelCheckPage({ searchParams }: PageProps<"/admin
                   <tr key={r.id}>
                     <td className={`${td} max-w-md`}>
                       <Link href={`/admin/questions/${r.id}`} className="hover:underline">
-                        <span className="text-muted">{r.subtype}</span> {r.prompt}
+                        <span className="font-mono text-muted">{r.code}</span> {r.prompt}
                       </Link>
                     </td>
                     <td className={td}><StatusBadge status={r.status} /></td>

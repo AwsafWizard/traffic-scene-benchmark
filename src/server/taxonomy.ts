@@ -206,17 +206,20 @@ export async function deleteCategory(id: number): Promise<Saved & { topics?: num
 }
 
 /**
- * Files a question under another subtype. A question not yet sent for checking
+ * Files a question under another subtype, which gives it a new code. A question not yet sent for checking
  * takes the new subtype's verifiability; one already checked keeps the
  * verifiability it was checked under.
  */
-export async function moveQuestionToSubtype(questionId: string, subtypeId: number): Promise<Saved> {
+export async function moveQuestionToSubtype(questionId: string, subtypeId: number): Promise<Saved & { from?: string; to?: string }> {
   const [subtype] = await sql<{ verifiability: string }[]>`select verifiability from subtypes where id = ${subtypeId}`;
   if (!subtype) return bad("Pick a subtype.");
-  const result = await sql`
-    update questions set subtype_id = ${subtypeId},
-      verifiability = case when status = 'written' then ${subtype.verifiability} else verifiability end,
+  // The database gives the question a new code for its new subtype.
+  const [row] = await sql<{ from: string; to: string }[]>`
+    update questions q set subtype_id = ${subtypeId},
+      verifiability = case when q.status = 'written' then ${subtype.verifiability} else q.verifiability end,
       former_subtype = null, updated_at = now()
-    where id = ${questionId}`;
-  return result.count ? { ok: true } : bad("Question not found.");
+    from (select id, code from questions where id = ${questionId}) old
+    where q.id = old.id
+    returning old.code as from, q.code as to`;
+  return row ? { ok: true, from: row.from, to: row.to } : bad("Question not found.");
 }

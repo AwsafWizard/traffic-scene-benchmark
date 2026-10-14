@@ -13,6 +13,8 @@ import {
 
 export interface Annotator {
   id: string;
+  /** The setter number at the start of their question codes. */
+  number: number | null;
   username: string;
   display_name: string;
   active: boolean;
@@ -22,14 +24,14 @@ export interface Annotator {
 
 export async function listAnnotators({ activeOnly = false } = {}): Promise<Annotator[]> {
   return sql<Annotator[]>`
-    select id, username, display_name, active, last_login_at, created_at from users
+    select id, number, username, display_name, active, last_login_at, created_at from users
     where role = 'annotator' and ${activeOnly ? sql`active` : sql`true`}
     order by active desc, display_name`;
 }
 
 export async function getAnnotator(id: string): Promise<Annotator | null> {
   const [row] = await sql<Annotator[]>`
-    select id, username, display_name, active, last_login_at, created_at from users
+    select id, number, username, display_name, active, last_login_at, created_at from users
     where id = ${id} and role = 'annotator'`;
   return row ?? null;
 }
