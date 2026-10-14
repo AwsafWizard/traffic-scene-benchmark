@@ -1,3 +1,5 @@
+<p align="center"><img src="public/brand/logo.svg" alt="DhakaDrive-VQA" width="420"></p>
+
 # DhakaDrive-VQA annotation platform
 
 A web app for writing and cross-checking the DhakaDrive-VQA benchmark questions. Annotators upload traffic scenes and write multiple-choice questions on the topics they're given; other annotators then check them without seeing the setter's answer first. The admin runs everything: accounts, the taxonomy, sprints, the model check, statistics and export.

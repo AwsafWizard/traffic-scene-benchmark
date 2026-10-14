@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import { getSessionUser } from "@/server/auth";
 import { logoutAction } from "./actions/auth";
+import { Logo } from "./ui/Logo";
 import "./globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -41,7 +42,9 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         {user && (
           <header className="border-b border-line bg-surface">
             <nav className="mx-auto flex max-w-6xl flex-wrap items-center gap-1 px-6 py-3">
-              <span className="mr-4 text-sm font-semibold tracking-tight">DhakaDrive-VQA</span>
+              <Link href={user.role === "admin" ? "/admin" : "/"} className="mr-4">
+                <Logo />
+              </Link>
               {nav.map((item) => (
                 <Link
                   key={item.href}
