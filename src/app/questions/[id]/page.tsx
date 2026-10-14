@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireAnnotator } from "@/server/auth";
 import { sql } from "@/server/db";
-import { getQuestion, listMyImages } from "@/server/questions";
+import { getQuestion, listMyImages, setterCanEdit } from "@/server/questions";
 import { imageSrc } from "@/server/storage";
 import { getTagGroups } from "@/server/taxonomy";
 import { deleteQuestionAction, resubmitQuestionAction } from "../../actions/annotator";
@@ -23,8 +23,8 @@ export default async function EditQuestionPage({ params }: PageProps<"/questions
     from questions q join sprints s on s.id = q.sprint_id join assignments a on a.id = q.assignment_id
     join categories c on c.id = a.category_id left join subtypes st on st.id = a.subtype_id
     where q.id = ${id}`;
-  const editable = (question.status === "written" && meta.sprint_status === "writing") || question.status === "returned";
-  if (!editable) {
+  const toFix = question.status === "returned" || question.status === "dropped";
+  if (!setterCanEdit(question.status, meta.sprint_status)) {
     return (
       <>
         <PageHeader title="Question" />
@@ -48,12 +48,13 @@ export default async function EditQuestionPage({ params }: PageProps<"/questions
   return (
     <div className="space-y-6">
       <PageHeader
-        title={question.status === "returned" ? "Fix this question" : "Edit question"}
+        title={toFix ? "Fix this question" : "Edit question"}
         sub={<span className="font-mono">{question.code}</span>}
       />
-      {question.status === "returned" && question.admin_note && (
+      {toFix && (
         <Notice tone="warn">
-          <b>The admin says:</b> {question.admin_note}
+          <b>{question.status === "dropped" ? "The admin dropped this question:" : "The admin says:"}</b> {question.admin_note}
+          <span className="mt-1 block">Fix it below and save, then send it back to the admin.</span>
         </Notice>
       )}
       <QuestionForm
@@ -72,7 +73,7 @@ export default async function EditQuestionPage({ params }: PageProps<"/questions
         }}
       />
       <div className="flex flex-wrap gap-3 border-t border-line pt-4">
-        {question.status === "returned" && (
+        {toFix && (
           <form action={resubmitQuestionAction.bind(null, question.id)}>
             <SubmitButton className={buttonSecondary} pending="Sending…">
               Send back to the admin

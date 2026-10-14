@@ -97,8 +97,12 @@ export async function createQuestion(userId: string, assignmentId: number, input
 
 /**
  * The setter editing their own question: freely while the sprint is still being
- * written, and again if the admin sent it back.
+ * written, and again if the admin sent it back or dropped it.
  */
+export function setterCanEdit(status: string, sprintStatus: string): boolean {
+  return (status === "written" && sprintStatus === "writing") || status === "returned" || status === "dropped";
+}
+
 export async function updateQuestion(userId: string, questionId: string, input: QuestionInput): Promise<Result> {
   const content = validateQuestionContent(input);
   if (!content.ok) return content;
@@ -107,8 +111,7 @@ export async function updateQuestion(userId: string, questionId: string, input: 
     from questions q join sprints s on s.id = q.sprint_id join assignments a on a.id = q.assignment_id
     where q.id = ${questionId} and q.author_id = ${userId}`;
   if (!q) return fail("Question not found.");
-  const editable = (q.status === "written" && q.sprint_status === "writing") || q.status === "returned";
-  if (!editable) return fail("This question can't be edited any more.");
+  if (!setterCanEdit(q.status, q.sprint_status)) return fail("This question can't be edited any more.");
   const [subtype] = await sql<{ verifiability: Verifiability }[]>`
     select verifiability from subtypes where id = ${input.subtypeId} and category_id = ${q.category_id}
       and ${q.topic_subtype ? sql`id = ${q.topic_subtype}` : sql`true`}`;
@@ -116,7 +119,7 @@ export async function updateQuestion(userId: string, questionId: string, input: 
   const [image] = await sql`select 1 from images where id = ${input.imageId} and uploader_id = ${userId}`;
   if (!image) return fail("Pick one of your images.");
 
-  // A returned question keeps the verifiability it was checked under.
+  // A returned or dropped question keeps the verifiability it was checked under.
   await sql`update questions set subtype_id = ${input.subtypeId}, image_id = ${input.imageId},
               prompt = ${content.prompt}, options = ${sql.json(content.options)}, correct_option = ${content.correct},
               verifiability = case when status = 'written' then ${subtype.verifiability} else verifiability end,
@@ -134,10 +137,10 @@ export async function deleteQuestion(userId: string, questionId: string): Promis
   return { ok: true };
 }
 
-/** A setter sending a returned question back to the admin after fixing it. */
+/** A setter sending a returned or dropped question back to the admin after fixing it. */
 export async function resubmitQuestion(userId: string, questionId: string): Promise<Result> {
-  const [q] = await sql`select 1 from questions where id = ${questionId} and author_id = ${userId} and status = 'returned'`;
-  if (!q) return fail("Only a question the admin sent back can be resubmitted.");
+  const [q] = await sql`select 1 from questions where id = ${questionId} and author_id = ${userId} and status in ('returned', 'dropped')`;
+  if (!q) return fail("Only a question the admin sent back or dropped can be resubmitted.");
   await sql`update questions set status = 'flagged', resolution = 'resubmitted', updated_at = now() where id = ${questionId}`;
   return { ok: true };
 }
@@ -274,7 +277,10 @@ export async function reviewQuestion(
       await sql`update questions set status = 'returned', admin_note = ${note}, updated_at = now() where id = ${questionId}`;
       break;
     case "drop":
-      await sql`update questions set status = 'dropped', resolution = 'dropped', admin_note = coalesce(${note}, admin_note),
+      // The setter sees the reason on their dashboard and can fix and resubmit.
+      if (!note) return fail("Tell the setter why it was dropped.");
+      if (q.status === "dropped") return fail("It's already dropped.");
+      await sql`update questions set status = 'dropped', resolution = 'dropped', admin_note = ${note},
                 updated_at = now() where id = ${questionId}`;
       break;
     case "restore":

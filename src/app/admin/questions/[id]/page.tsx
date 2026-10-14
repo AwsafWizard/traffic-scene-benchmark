@@ -182,13 +182,7 @@ export default async function AdminQuestionPage({ params }: PageProps<"/admin/qu
                 <SubmitButton className={buttonSecondary} confirm="Accept the setter's answer as it stands?">Accept as is</SubmitButton>
               </ActionForm>
             )}
-            {q.status !== "dropped" ? (
-              <ActionForm action={reviewAction}>
-                <input type="hidden" name="question_id" value={q.id} />
-                <input type="hidden" name="action" value="drop" />
-                <SubmitButton className={buttonDanger} confirm="Drop this question from the benchmark?">Drop</SubmitButton>
-              </ActionForm>
-            ) : (
+            {q.status === "dropped" && (
               <ActionForm action={reviewAction}>
                 <input type="hidden" name="question_id" value={q.id} />
                 <input type="hidden" name="action" value="restore" />
@@ -196,6 +190,23 @@ export default async function AdminQuestionPage({ params }: PageProps<"/admin/qu
               </ActionForm>
             )}
           </div>
+          {q.status === "dropped" && (
+            <p className="text-sm text-muted">
+              Dropped. The setter sees the reason on their dashboard and can fix it and send it back for review.
+            </p>
+          )}
+
+          {q.status !== "dropped" && (
+            <details>
+              <summary className="cursor-pointer text-sm text-red-600 dark:text-red-400">Drop from the benchmark</summary>
+              <ActionForm action={reviewAction} className="mt-2 space-y-2">
+                <input type="hidden" name="question_id" value={q.id} />
+                <input type="hidden" name="action" value="drop" />
+                <textarea name="note" rows={2} className={input} placeholder="Why? The setter sees this and can fix it and resubmit." required />
+                <SubmitButton className={buttonDanger}>Drop</SubmitButton>
+              </ActionForm>
+            </details>
+          )}
 
           {q.status === "flagged" && (
             <details>

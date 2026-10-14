@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireAnnotator } from "@/server/auth";
-import { listMyQuestions } from "@/server/questions";
+import { listMyQuestions, setterCanEdit } from "@/server/questions";
 import { imageSrc } from "@/server/storage";
 import { Notice, PageHeader, StatusBadge, VBadge } from "../ui/components";
 import { buttonSecondary, card } from "../ui/styles";
@@ -29,7 +29,8 @@ export default async function MyQuestionsPage({ searchParams }: PageProps<"/ques
       ) : (
         <ul className="space-y-3">
           {questions.map((q) => {
-            const editable = (q.status === "written" && q.sprint_status === "writing") || q.status === "returned";
+            const editable = setterCanEdit(q.status, q.sprint_status);
+            const toFix = q.status === "returned" || q.status === "dropped";
             return (
               <li key={q.id} className={`${card} flex gap-4 p-4`}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -43,15 +44,16 @@ export default async function MyQuestionsPage({ searchParams }: PageProps<"/ques
                     <span>· {q.sprint_name}</span>
                   </div>
                   <p className="text-sm">{q.prompt}</p>
-                  {q.status === "returned" && q.admin_note && (
+                  {toFix && q.admin_note && (
                     <p className="rounded-md bg-amber-500/10 px-2 py-1 text-sm text-amber-700 dark:text-amber-400">
-                      Admin: {q.admin_note}
+                      {q.status === "dropped" ? "Dropped: " : "Admin: "}
+                      {q.admin_note}
                     </p>
                   )}
                 </div>
                 {editable && (
                   <Link href={`/questions/${q.id}`} className={`${buttonSecondary} self-start`}>
-                    {q.status === "returned" ? "Fix" : "Edit"}
+                    {toFix ? "Fix" : "Edit"}
                   </Link>
                 )}
               </li>

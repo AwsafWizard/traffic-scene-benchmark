@@ -12,6 +12,9 @@ export default async function Home() {
   const queue = sprint?.status === "verifying" ? await myQueue(user.id) : null;
   const [{ returned }] = await sql<{ returned: number }[]>`
     select count(*)::int as returned from questions where author_id = ${user.id} and status = 'returned'`;
+  const dropped = await sql<{ id: string; code: string; prompt: string; admin_note: string | null; updated_at: Date }[]>`
+    select id, code, prompt, admin_note, updated_at from questions
+    where author_id = ${user.id} and status = 'dropped' order by updated_at desc`;
 
   return (
     <div className="space-y-6">
@@ -27,6 +30,28 @@ export default async function Home() {
             See what to change
           </Link>
         </Notice>
+      )}
+
+      {dropped.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Dropped by the admin ({dropped.length})</h2>
+          <ul className={`${card} divide-y divide-line`}>
+            {dropped.map((q) => (
+              <li key={q.id} className="flex flex-wrap items-start gap-3 p-4">
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="font-mono text-xs text-muted">{q.code}</div>
+                  <p className="text-sm">{q.prompt}</p>
+                  {q.admin_note && (
+                    <p className="rounded-md bg-red-500/10 px-2 py-1 text-sm text-red-700 dark:text-red-400">Reason: {q.admin_note}</p>
+                  )}
+                </div>
+                <Link href={`/questions/${q.id}`} className={buttonSecondary}>
+                  Fix and resubmit
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {!sprint && <Notice>No sprint is running right now. Your admin will start one.</Notice>}

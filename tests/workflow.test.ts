@@ -312,6 +312,19 @@ describe.skipIf(!reachable)("sprint workflow", () => {
     expect((await m.questions.reviewQuestion(ids.admin, question.bob2, "fix", { options: ["a", "b"] })).ok).toBe(false);
   });
 
+  it("drops with a reason the setter can act on: fix, resubmit, back to review", async () => {
+    expect((await m.questions.reviewQuestion(ids.admin, question.ann2, "drop", {})).ok).toBe(false); // reason required
+    expect(await m.questions.reviewQuestion(ids.admin, question.ann2, "drop", { note: "Blurry image" })).toEqual({ ok: true });
+    expect(await status("ann2")).toMatchObject({ status: "dropped" });
+    // Only the setter can fix it.
+    const input = { subtypeId: subtype["1.1"], imageId: ids.ann_image, prompt: "ann question 2 (sharper)", options: ["Yes", "No"], correctIndex: 1 };
+    expect((await m.questions.updateQuestion(ids.bob, question.ann2, input)).ok).toBe(false);
+    expect(await m.questions.updateQuestion(ids.ann, question.ann2, input)).toEqual({ ok: true });
+    expect(await m.questions.resubmitQuestion(ids.ann, question.ann2)).toEqual({ ok: true });
+    expect(await status("ann2")).toMatchObject({ status: "flagged" });
+    expect(await m.questions.reviewQuestion(ids.admin, question.ann2, "accept", {})).toEqual({ ok: true });
+  });
+
   it("reports statistics and agreement", async () => {
     const o = await m.stats.overview(sprintId);
     expect(o.status.total).toBe(8);
