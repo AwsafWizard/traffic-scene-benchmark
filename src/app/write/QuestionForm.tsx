@@ -82,12 +82,15 @@ export default function QuestionForm({
   images: initialImages,
   tagGroups,
   initial,
+  resubmit,
 }: {
   mode: "create" | "edit";
   topics: FormTopic[];
   images: FormImage[];
   tagGroups: TagGroupView[];
   initial: Initial;
+  /** Saving this edit also resubmits the question; asked to confirm with this text. */
+  resubmit?: string;
 }) {
   const router = useRouter();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -172,6 +175,7 @@ export default function QuestionForm({
     setSaved(null);
     if (!imageId) return setError("Choose or upload the image first.");
     if (missingTags.length) return setError(`Tag the image first: ${missingTags.join(", ")}.`);
+    if (resubmit && !window.confirm(resubmit)) return;
     setSaving(true);
     const payload = { subtypeId, imageId, prompt, options, correctIndex: correct };
     const result =
@@ -181,7 +185,14 @@ export default function QuestionForm({
     setSaving(false);
     if (!result.ok) return setError(result.error);
     if (mode === "edit") {
-      setSaved("Changes saved.");
+      const rechecking = "rechecking" in result ? result.rechecking : undefined;
+      setSaved(
+        rechecking === true
+          ? "Saved and resubmitted. The checkers will answer it again."
+          : rechecking === false
+            ? "Saved and sent to the admin for review."
+            : "Changes saved.",
+      );
       router.refresh();
       return;
     }
@@ -326,7 +337,7 @@ export default function QuestionForm({
         {error && <p className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
         {saved && <p className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-400">{saved}</p>}
         <button type="submit" disabled={saving || uploading} className={button}>
-          {saving ? "Saving…" : mode === "create" ? "Save question" : "Save changes"}
+          {saving ? "Saving…" : mode === "create" ? "Save question" : resubmit ? "Save and resubmit" : "Save changes"}
         </button>
       </div>
 

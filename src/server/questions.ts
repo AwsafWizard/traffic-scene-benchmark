@@ -1,7 +1,7 @@
 import "server-only";
 import { audit } from "./audit";
-import { sql } from "./db";
-import type { Verifiability } from "./engine";
+import { sql, type Tx } from "./db";
+import { shuffled, type Verifiability } from "./engine";
 import { liveSprint, sprintAssignments, type Assignment, type Result } from "./sprints";
 import type { StoredImage } from "./storage";
 
@@ -97,13 +97,23 @@ export async function createQuestion(userId: string, assignmentId: number, input
 
 /**
  * The setter editing their own question: freely while the sprint is still being
- * written, and again if the admin sent it back or dropped it.
+ * written, after the admin sent it back or dropped it, and while it's being
+ * checked or flagged (saving then sends it back for checking). Never once accepted.
  */
 export function setterCanEdit(status: string, sprintStatus: string): boolean {
-  return (status === "written" && sprintStatus === "writing") || status === "returned" || status === "dropped";
+  return (status === "written" && sprintStatus === "writing") || ["returned", "dropped", "checking", "flagged"].includes(status);
 }
 
-export async function updateQuestion(userId: string, questionId: string, input: QuestionInput): Promise<Result> {
+/** Editing one of these resubmits it in the same step: checking starts over. */
+export function editRestartsChecking(status: string): boolean {
+  return status === "checking" || status === "flagged";
+}
+
+export async function updateQuestion(
+  userId: string,
+  questionId: string,
+  input: QuestionInput,
+): Promise<Result & { rechecking?: boolean }> {
   const content = validateQuestionContent(input);
   if (!content.ok) return content;
   const [q] = await sql<{ status: string; sprint_status: string; assignment_id: number; category_id: number; topic_subtype: number | null }[]>`
@@ -119,13 +129,60 @@ export async function updateQuestion(userId: string, questionId: string, input: 
   const [image] = await sql`select 1 from images where id = ${input.imageId} and uploader_id = ${userId}`;
   if (!image) return fail("Pick one of your images.");
 
-  // A returned or dropped question keeps the verifiability it was checked under.
-  await sql`update questions set subtype_id = ${input.subtypeId}, image_id = ${input.imageId},
-              prompt = ${content.prompt}, options = ${sql.json(content.options)}, correct_option = ${content.correct},
-              verifiability = case when status = 'written' then ${subtype.verifiability} else verifiability end,
-              updated_at = now()
-            where id = ${questionId}`;
-  return { ok: true };
+  return sql.begin(async (tx) => {
+    // Locked so a checker answering at this moment goes either before the edit or not at all.
+    const [now] = await tx<{ status: string; sprint_status: string; prompt: string; options: Option[]; correct_option: string }[]>`
+      select q.status, s.status as sprint_status, q.prompt, q.options, q.correct_option
+      from questions q join sprints s on s.id = q.sprint_id where q.id = ${questionId} for update of q`;
+    if (!setterCanEdit(now.status, now.sprint_status)) return fail("This question can't be edited any more.");
+
+    // A question that has been checked keeps the verifiability it was checked under.
+    await tx`update questions set subtype_id = ${input.subtypeId}, image_id = ${input.imageId},
+               prompt = ${content.prompt}, options = ${tx.json(content.options)}, correct_option = ${content.correct},
+               verifiability = case when status = 'written' then ${subtype.verifiability} else verifiability end,
+               updated_at = now()
+             where id = ${questionId}`;
+    if (!editRestartsChecking(now.status)) return { ok: true };
+    const rechecking = await restartChecking(tx, questionId, now.sprint_status === "verifying");
+    await audit(userId, "question.edit_resubmit", questionId, {
+      before: { status: now.status, prompt: now.prompt, options: now.options, correct: now.correct_option },
+      ...rechecking.removed,
+    }, tx);
+    return { ok: true, rechecking: rechecking.again };
+  });
+}
+
+/**
+ * After the setter edits a question that was being checked or was flagged: the
+ * same checkers answer it again from scratch, on new tasks (so a page still open
+ * on the old version can't answer the new one). Earlier checker and model
+ * answers were about the old wording, so they're removed here and returned for
+ * the audit log. If verification is over, the admin reviews it instead.
+ */
+async function restartChecking(tx: Tx, questionId: string, verifying: boolean) {
+  const checks = await tx<{ checker_id: string; role: string | null; blind_choice: string | null; blind_note: string | null; judgment: string | null; judgment_reason: string | null; odd_one: string | null }[]>`
+    delete from checks where question_id = ${questionId}
+    returning checker_id, role, blind_choice, blind_note, judgment, judgment_reason, odd_one`;
+  const models = await tx<{ model_id: number; chosen_option: string | null }[]>`
+    delete from model_answers where question_id = ${questionId} returning model_id, chosen_option`;
+  const removed = { old_checks: checks, old_model_answers: models };
+  if (!verifying || checks.length === 0) {
+    await tx`update questions set status = 'flagged', resolution = 'resubmitted', updated_at = now() where id = ${questionId}`;
+    return { again: false, removed };
+  }
+  const [q] = await tx<{ options: Option[] }[]>`select options from questions where id = ${questionId}`;
+  const rows = checks.map((c) => ({
+    question_id: questionId,
+    checker_id: c.checker_id,
+    // I roles go to whoever answers first, as before.
+    role: c.role === "v" || c.role === "c" ? c.role : null,
+    option_order: shuffled(q.options.map((o) => o.id)),
+  }));
+  await tx`insert into checks (question_id, checker_id, role, option_order)
+           select question_id, checker_id, role, option_order
+           from jsonb_to_recordset(${tx.json(rows)}) as r(question_id uuid, checker_id uuid, role text, option_order jsonb)`;
+  await tx`update questions set status = 'checking', resolution = null, updated_at = now() where id = ${questionId}`;
+  return { again: true, removed };
 }
 
 export async function deleteQuestion(userId: string, questionId: string): Promise<Result> {

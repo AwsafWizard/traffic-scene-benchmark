@@ -325,6 +325,34 @@ describe.skipIf(!reachable)("sprint workflow", () => {
     expect(await m.questions.reviewQuestion(ids.admin, question.ann2, "accept", {})).toEqual({ ok: true });
   });
 
+  it("lets the setter edit a flagged question, which the same checkers then answer afresh", async () => {
+    const before = await checkFor("cat2");
+    const input = { subtypeId: subtype["5.4"], imageId: ids.cat_image, prompt: "cat question 2 (clearer)", options: ["Yes", "No", "Not sure"], correctIndex: 0 };
+    expect((await m.questions.updateQuestion(ids.ann, question.cat2, input)).ok).toBe(false); // not the setter
+    expect(await m.questions.updateQuestion(ids.cat, question.cat2, input)).toEqual({ ok: true, rechecking: true });
+    expect(await status("cat2")).toEqual({ status: "checking", resolution: null });
+
+    const after = await m.sql<{ id: string; checker_id: string; role: string | null; blind_choice: string | null; option_order: string[] }[]>`
+      select id, checker_id, role, blind_choice, option_order from checks where question_id = ${question.cat2}`;
+    expect(after.map((c) => c.checker_id).sort()).toEqual(before.map((c) => c.checker_id).sort());
+    expect(after.every((c) => c.role === null && c.blind_choice === null && c.option_order.length === 3)).toBe(true);
+    // A page still open on the old version can't answer the new one.
+    expect((await m.checks.submitBlind(before[0].checker_id, before[0].id, "a", "")).ok).toBe(false);
+    const [history] = await m.sql<{ details: { old_checks: unknown[] } }[]>`
+      select details from audit_log where action = 'question.edit_resubmit' and target = ${question.cat2}`;
+    expect(history.details.old_checks).toHaveLength(2);
+
+    const [c, d] = after;
+    await m.checks.submitBlind(c.checker_id, c.id, "a", "");
+    await m.checks.submitJudgment(c.checker_id, c.id, "disagree", "Still ambiguous", null);
+    await m.checks.submitBlind(d.checker_id, d.id, "a", "");
+    await m.checks.submitJudgment(d.checker_id, d.id, "not_all_agree", "Second disagreed", "second");
+    expect(await status("cat2")).toEqual({ status: "flagged", resolution: "second_disagreed" });
+
+    // Accepted questions are final.
+    expect((await m.questions.updateQuestion(ids.cat, question.cat1, { ...input, prompt: "late change" })).ok).toBe(false);
+  });
+
   it("reports statistics and agreement", async () => {
     const o = await m.stats.overview(sprintId);
     expect(o.status.total).toBe(8);

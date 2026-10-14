@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireAnnotator } from "@/server/auth";
-import { listMyQuestions, setterCanEdit } from "@/server/questions";
+import { editRestartsChecking, listMyQuestions, setterCanEdit } from "@/server/questions";
 import { imageSrc } from "@/server/storage";
 import { Notice, PageHeader, StatusBadge, VBadge } from "../ui/components";
 import { buttonSecondary, card } from "../ui/styles";
@@ -53,7 +53,7 @@ export default async function MyQuestionsPage({ searchParams }: PageProps<"/ques
                 </div>
                 {editable && (
                   <Link href={`/questions/${q.id}`} className={`${buttonSecondary} self-start`}>
-                    {toFix ? "Fix" : "Edit"}
+                    {toFix ? "Fix" : editRestartsChecking(q.status) ? "Edit and resubmit" : "Edit"}
                   </Link>
                 )}
               </li>

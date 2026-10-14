@@ -32,7 +32,9 @@ There is no sign-up and annotators can't change their own password. A new passwo
 
    Anything else is **flagged** for the admin. Every checking screen also offers *None of these is correct* and *Can't tell from the image*, and options are shuffled for every checker and model.
 5. **Model check** — the admin draws a sample (10% by default, at least one per subtype) and gets model answers by API or records them by hand (see [Models](#models)).
-6. **Review and close** — the admin accepts, fixes, sends back or drops flagged questions, closes the sprint and exports.
+6. **Review and close** — the admin accepts, fixes, sends back or drops flagged questions (a drop needs a reason, which the setter sees), closes the sprint and exports.
+
+Setters can keep improving their own questions until one is accepted. Editing a question that's being checked or is flagged resubmits it: the answers so far are cleared (and kept in the question's history) and the same checkers answer it again on fresh tasks. After verification has ended, the edit goes to the admin instead. A question the admin sent back or dropped is fixed and then sent back to the admin.
 
 ### Question codes
 
@@ -88,6 +90,12 @@ To try the annotator side quickly, seed four sample annotators and a sprint in i
 
 ```bash
 DEV_SEED_PASSWORD=some-long-password npm run db:seed-dev
+```
+
+Or, to try verification straight away, a sprint whose questions are all written already (16 questions on generated test images, ready for the admin to draw checkers and start verification):
+
+```bash
+npm run db:seed-dev -- --ready-to-check
 ```
 
 Tests (`npm test`) cover the checking rules, the checker draw, the agreement statistics, and an end-to-end sprint against a throwaway database (start `npm run db:dev` first; without it that file is skipped).
