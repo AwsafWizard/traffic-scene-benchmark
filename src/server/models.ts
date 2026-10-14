@@ -34,6 +34,8 @@ export interface Model {
   active: boolean;
   /** True when the app can call this model itself. */
   api_ready: boolean;
+  /** Answers recorded for it, by API or by hand. */
+  answers: number;
 }
 
 const fail = (error: string): Result => ({ ok: false, error });
@@ -43,7 +45,8 @@ export async function listModels({ activeOnly = false } = {}): Promise<Model[]> 
   const rows = await sql<(Omit<Model, "price_in" | "price_out"> & { price_in: string | null; price_out: string | null })[]>`
     select m.id, m.name, m.provider, m.model_id, m.connection_id, c.name as connection_name, m.family, m.funded,
       m.price_in, m.price_out, m.request_options, m.notes, m.active,
-      (m.model_id is not null and c.active and (c.api_key_enc is not null or c.kind = 'openai_compatible')) is true as api_ready
+      (m.model_id is not null and c.active and (c.api_key_enc is not null or c.kind = 'openai_compatible')) is true as api_ready,
+      (select count(*)::int from model_answers a where a.model_id = m.id) as answers
     from models m left join api_connections c on c.id = m.connection_id
     where ${activeOnly ? sql`m.active` : sql`true`}
     order by m.active desc, m.sort, m.name`;
@@ -52,6 +55,16 @@ export async function listModels({ activeOnly = false } = {}): Promise<Model[]> 
     price_in: r.price_in === null ? null : Number(r.price_in),
     price_out: r.price_out === null ? null : Number(r.price_out),
   }));
+}
+
+/** Deletes a model along with every answer recorded for it. */
+export async function deleteModel(adminId: string, id: number): Promise<Result> {
+  const [row] = await sql<{ name: string; answers: number }[]>`
+    with gone as (delete from models where id = ${id} returning id, name)
+    select name, (select count(*)::int from model_answers where model_id = ${id}) as answers from gone`;
+  if (!row) return fail("Model not found.");
+  await audit(adminId, "model.delete", id, { name: row.name, answers: row.answers });
+  return { ok: true };
 }
 
 /** Parses the admin's request-options JSON: an object, small, and unable to replace the prompt. */

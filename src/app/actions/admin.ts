@@ -6,7 +6,7 @@ import { audit } from "@/server/audit";
 import { actionUser, AuthError } from "@/server/auth";
 import { sql } from "@/server/db";
 import { deleteConnection, listRemoteModels, saveConnection } from "@/server/connections";
-import { recordManualAnswer, runModelApi, saveModel } from "@/server/models";
+import { deleteModel, recordManualAnswer, runModelApi, saveModel } from "@/server/models";
 import { reviewQuestion, type ReviewAction } from "@/server/questions";
 import {
   addAssignment,
@@ -21,7 +21,15 @@ import {
   updateAssignmentTarget,
   updateSprint,
 } from "@/server/sprints";
-import { saveCategory, saveSubtype, saveTag, saveTagGroup } from "@/server/taxonomy";
+import {
+  deleteCategory,
+  deleteSubtype,
+  moveQuestionToSubtype,
+  saveCategory,
+  saveSubtype,
+  saveTag,
+  saveTagGroup,
+} from "@/server/taxonomy";
 import {
   changeAdminPassword,
   createAnnotator,
@@ -131,6 +139,43 @@ export async function saveSubtypeAction(_prev: AdminState, form: FormData): Prom
     await audit(me.id, id ? "subtype.update" : "subtype.create", id ?? input.code, input);
     revalidatePath("/admin/taxonomy");
     return { ok: "Saved." };
+  });
+}
+
+export async function deleteSubtypeAction(_prev: AdminState, form: FormData): Promise<AdminState> {
+  return guarded(async () => {
+    const me = await admin();
+    const id = num(form, "id");
+    const result = await deleteSubtype(id);
+    if (!result.ok) return { error: result.error };
+    await audit(me.id, "subtype.delete", id, { questions: result.questions, topics: result.topics });
+    revalidatePath("/admin/taxonomy");
+    return { ok: "Deleted." };
+  });
+}
+
+export async function deleteCategoryAction(_prev: AdminState, form: FormData): Promise<AdminState> {
+  return guarded(async () => {
+    const me = await admin();
+    const id = num(form, "id");
+    const result = await deleteCategory(id);
+    if (!result.ok) return { error: result.error };
+    await audit(me.id, "category.delete", id, { topics: result.topics });
+    revalidatePath("/admin/taxonomy");
+    return { ok: "Deleted." };
+  });
+}
+
+export async function moveQuestionAction(_prev: AdminState, form: FormData): Promise<AdminState> {
+  return guarded(async () => {
+    const me = await admin();
+    const id = text(form, "question_id");
+    const subtypeId = num(form, "subtype_id");
+    const result = await moveQuestionToSubtype(id, subtypeId);
+    if (!result.ok) return { error: result.error };
+    await audit(me.id, "question.move", id, { subtype_id: subtypeId });
+    revalidatePath(`/admin/questions/${id}`);
+    return { ok: "Moved." };
   });
 }
 
@@ -310,6 +355,16 @@ export async function saveConnectionAction(_prev: AdminState, form: FormData): P
     if (!result.ok) return { error: result.error };
     revalidatePath("/admin/models");
     return { ok: "Saved. The key is stored encrypted and won't be shown again." };
+  });
+}
+
+export async function deleteModelAction(_prev: AdminState, form: FormData): Promise<AdminState> {
+  return guarded(async () => {
+    const me = await admin();
+    const result = await deleteModel(me.id, num(form, "id"));
+    if (!result.ok) return { error: result.error };
+    revalidatePath("/admin/models");
+    return { ok: "Deleted." };
   });
 }
 

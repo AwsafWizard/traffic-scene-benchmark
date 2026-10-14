@@ -1,5 +1,5 @@
 import "server-only";
-import { sql } from "./db";
+import { sql, type Tx } from "./db";
 import type { Verifiability } from "./engine";
 
 export interface Subtype {
@@ -12,6 +12,7 @@ export interface Subtype {
   regional: boolean;
   sort: number;
   active: boolean;
+  system: boolean;
 }
 
 export interface Category {
@@ -21,6 +22,7 @@ export interface Category {
   description: string | null;
   sort: number;
   active: boolean;
+  system: boolean;
   subtypes: Subtype[];
 }
 
@@ -44,11 +46,11 @@ export interface TagGroup {
 /** Categories with their subtypes, in display order. */
 export async function getTaxonomy({ activeOnly = false } = {}): Promise<Category[]> {
   const categories = await sql<Omit<Category, "subtypes">[]>`
-    select id, code, name, description, sort, active from categories
+    select id, code, name, description, sort, active, system from categories
     where ${activeOnly ? sql`active` : sql`true`}
     order by sort, code`;
   const subtypes = await sql<Subtype[]>`
-    select id, category_id, code, name, keywords, verifiability, regional, sort, active from subtypes
+    select id, category_id, code, name, keywords, verifiability, regional, sort, active, system from subtypes
     where ${activeOnly ? sql`active` : sql`true`}
     order by sort, code`;
   return categories.map((c) => ({ ...c, subtypes: subtypes.filter((s) => s.category_id === c.id) }));
@@ -153,4 +155,68 @@ export async function saveTag(input: { id?: number; group_id: number; name: stri
     await sql`insert into tags (group_id, name, sort, active) values (${input.group_id}, ${name}, ${input.sort}, ${input.active})`;
   }
   return { ok: true };
+}
+
+// Deleting -------------------------------------------------------------------------------
+
+async function uncategorised(tx: Tx) {
+  const [row] = await tx<{ category_id: number; subtype_id: number }[]>`
+    select c.id as category_id, s.id as subtype_id from categories c join subtypes s on s.category_id = c.id
+    where c.system and s.system limit 1`;
+  if (!row) throw new Error("The built-in Uncategorised type is missing; run the database migrations.");
+  return row;
+}
+
+/**
+ * Deletes a subtype. Its questions move to the built-in Uncategorised type,
+ * remembering the subtype they came from, and topics assigned to it move too.
+ */
+export async function deleteSubtype(id: number): Promise<{ ok: true; questions: number; topics: number } | { ok: false; error: string }> {
+  return sql.begin(async (tx) => {
+    const [subtype] = await tx<{ code: string; name: string; system: boolean }[]>`
+      select code, name, system from subtypes where id = ${id} for update`;
+    if (!subtype) return { ok: false as const, error: "Subtype not found." };
+    if (subtype.system) return { ok: false as const, error: "The Uncategorised subtype can't be deleted." };
+    const target = await uncategorised(tx);
+    const moved = await tx`
+      update questions set subtype_id = ${target.subtype_id},
+        former_subtype = coalesce(former_subtype, ${`${subtype.code} ${subtype.name}`}), updated_at = now()
+      where subtype_id = ${id}`;
+    const topics = await tx`
+      update assignments set subtype_id = ${target.subtype_id}, category_id = ${target.category_id}
+      where subtype_id = ${id}`;
+    await tx`delete from subtypes where id = ${id}`;
+    return { ok: true as const, questions: moved.count, topics: topics.count };
+  });
+}
+
+/** Deletes a type once its subtypes are gone. Whole-type topics move to Uncategorised. */
+export async function deleteCategory(id: number): Promise<Saved & { topics?: number }> {
+  return sql.begin(async (tx) => {
+    const [category] = await tx<{ system: boolean }[]>`select system from categories where id = ${id} for update`;
+    if (!category) return bad("Type not found.");
+    if (category.system) return bad("The Uncategorised type can't be deleted.");
+    const [{ n }] = await tx<{ n: number }[]>`select count(*)::int as n from subtypes where category_id = ${id}`;
+    if (n > 0) return bad("Delete this type's subtypes first (their questions move to Uncategorised).");
+    const target = await uncategorised(tx);
+    const topics = await tx`update assignments set category_id = ${target.category_id} where category_id = ${id}`;
+    await tx`delete from categories where id = ${id}`;
+    return { ok: true as const, topics: topics.count };
+  });
+}
+
+/**
+ * Files a question under another subtype. A question not yet sent for checking
+ * takes the new subtype's verifiability; one already checked keeps the
+ * verifiability it was checked under.
+ */
+export async function moveQuestionToSubtype(questionId: string, subtypeId: number): Promise<Saved> {
+  const [subtype] = await sql<{ verifiability: string }[]>`select verifiability from subtypes where id = ${subtypeId}`;
+  if (!subtype) return bad("Pick a subtype.");
+  const result = await sql`
+    update questions set subtype_id = ${subtypeId},
+      verifiability = case when status = 'written' then ${subtype.verifiability} else verifiability end,
+      former_subtype = null, updated_at = now()
+    where id = ${questionId}`;
+  return result.count ? { ok: true } : bad("Question not found.");
 }

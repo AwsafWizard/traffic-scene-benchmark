@@ -283,6 +283,10 @@ export interface QuestionDetail {
   author_name: string;
   category: string;
   subtype: string;
+  subtype_id: number;
+  /** Set while the question sits in Uncategorised: the deleted subtype it came from. */
+  former_subtype: string | null;
+  uncategorised: boolean;
   image: StoredImage;
   tags: { group: string; tag: string }[];
   in_sample: boolean;
@@ -307,7 +311,7 @@ export interface QuestionDetail {
 export async function questionDetail(id: string): Promise<QuestionDetail | null> {
   const [q] = await sql`
     select q.*, s.name as sprint_name, u.display_name as author_name,
-      c.code || '. ' || c.name as category, st.code || ' ' || st.name as subtype,
+      c.code || '. ' || c.name as category, st.code || ' ' || st.name as subtype, st.system as uncategorised,
       i.storage, i.storage_key, i.version,
       exists (select 1 from model_samples ms where ms.question_id = q.id) as in_sample
     from questions q join sprints s on s.id = q.sprint_id join users u on u.id = q.author_id

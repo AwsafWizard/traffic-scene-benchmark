@@ -36,11 +36,11 @@ There is no sign-up and annotators can't change their own password. A new passwo
 
 ### Taxonomy
 
-8 types and 41 subtypes, seeded from the team's category list (`db/migrations/0002_seed_taxonomy.sql`). The admin edits everything on the Taxonomy page: types, subtypes, their verifiability, and scene tag groups. A question keeps the verifiability it was written with, so editing a subtype never changes how existing questions are checked. Anything already used can be hidden but not deleted. All questions are multiple choice.
+8 types and 41 subtypes, seeded from the team's category list (`db/migrations/0002_seed_taxonomy.sql`). The admin edits everything on the Taxonomy page: types, subtypes, their verifiability, and scene tag groups. A question keeps the verifiability it was written with, so editing a subtype never changes how existing questions are checked. Hiding a subtype keeps it out of annotators' way; deleting one moves its questions (and any topic assigned to it) to a built-in **Uncategorised** type, where each question remembers its old subtype until the admin files it under a new one from the question's page. A type can be deleted once its subtypes are gone. All questions are multiple choice.
 
 ### Models
 
-The Models page holds the proposal's catalogue: 74 models (35 proprietary, 32 open-weight, 7 driving-specific), 29 of them funded, with their prices. Everything about them is editable.
+The Models page holds the proposal's catalogue: 74 models (35 proprietary, 32 open-weight, 7 driving-specific), 29 of them funded, with their prices. Everything about them is editable. Deleting a model also deletes the answers recorded for it; to retire a model but keep its answers, untick *In use* instead.
 
 A model is **asked by API** when it's linked to an **API connection** and has its provider model ID; any other model is **answered by hand** (run it anywhere, record the letter it chose). Connections come in three types:
 

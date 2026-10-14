@@ -1,20 +1,31 @@
 import { requireAdmin } from "@/server/auth";
 import { getTagGroups, getTaxonomy, subtypeUsage, type Category, type Subtype } from "@/server/taxonomy";
-import { saveCategoryAction, saveSubtypeAction, saveTagAction, saveTagGroupAction } from "../../actions/admin";
+import Link from "next/link";
+import {
+  deleteCategoryAction,
+  deleteSubtypeAction,
+  saveCategoryAction,
+  saveSubtypeAction,
+  saveTagAction,
+  saveTagGroupAction,
+} from "../../actions/admin";
 import { PageHeader, VBadge } from "../../ui/components";
 import SubmitButton from "../../ui/SubmitButton";
-import { buttonSecondary, card, input, label, select } from "../../ui/styles";
+import { buttonDanger, buttonSecondary, card, hint, input, label, select } from "../../ui/styles";
 import ActionForm from "../ActionForm";
 
 export default async function TaxonomyPage() {
   await requireAdmin();
-  const [taxonomy, groups, usage] = await Promise.all([getTaxonomy(), getTagGroups(), subtypeUsage()]);
+  const [all, groups, usage] = await Promise.all([getTaxonomy(), getTagGroups(), subtypeUsage()]);
+  const taxonomy = all.filter((c) => !c.system);
+  const uncategorised = all.find((c) => c.system)?.subtypes[0];
+  const waiting = uncategorised ? usage.get(uncategorised.id) ?? 0 : 0;
 
   return (
     <div className="space-y-8">
       <PageHeader
         title="Taxonomy"
-        sub="Types, subtypes and scene tags. Changes apply to new questions; existing questions keep the verifiability they were written with. Anything already used can be hidden but not deleted."
+        sub="Types, subtypes and scene tags. Changes apply to new questions; existing questions keep the verifiability they were written with. Deleting a subtype moves its questions to Uncategorised, where you can file them again."
       />
 
       {taxonomy.map((category) => (
@@ -28,6 +39,13 @@ export default async function TaxonomyPage() {
               <span className="text-xs text-accent">Edit type</span>
             </summary>
             <CategoryForm category={category} />
+            <div className="flex flex-wrap items-center gap-3 border-t border-line px-4 py-3">
+              {category.subtypes.length === 0 ? (
+                <DeleteForm action={deleteCategoryAction} id={category.id} label="Delete type" confirm={`Delete type ${category.code}. ${category.name}?`} />
+              ) : (
+                <p className={hint}>To delete this type, delete its subtypes first.</p>
+              )}
+            </div>
           </details>
           <ul className="divide-y divide-line border-t border-line">
             {category.subtypes.map((s) => (
@@ -45,6 +63,18 @@ export default async function TaxonomyPage() {
                     </span>
                   </summary>
                   <SubtypeForm subtype={s} categories={taxonomy} used={(usage.get(s.id) ?? 0) > 0} />
+                  <div className="bg-background/50 px-4 pb-4">
+                    <DeleteForm
+                      action={deleteSubtypeAction}
+                      id={s.id}
+                      label="Delete subtype"
+                      confirm={
+                        (usage.get(s.id) ?? 0) > 0
+                          ? `Delete ${s.code} ${s.name}? Its ${usage.get(s.id)} question(s) move to Uncategorised.`
+                          : `Delete ${s.code} ${s.name}?`
+                      }
+                    />
+                  </div>
                 </details>
               </li>
             ))}
@@ -60,6 +90,22 @@ export default async function TaxonomyPage() {
         <summary className="cursor-pointer p-4 text-sm text-accent">+ Add a type</summary>
         <CategoryForm nextSort={taxonomy.length + 1} />
       </details>
+
+      {uncategorised && (
+        <section className={`${card} flex flex-wrap items-center gap-3 p-4 text-sm`}>
+          <span className="font-medium">Uncategorised</span>
+          <span className="text-muted">
+            {waiting === 0
+              ? "Empty. Questions land here when their subtype is deleted."
+              : `${waiting} question${waiting === 1 ? "" : "s"} from deleted subtypes, waiting to be filed under a subtype.`}
+          </span>
+          {waiting > 0 && (
+            <Link href={`/admin/questions?sprint=all&subtype=${uncategorised.id}`} className={`${buttonSecondary} ml-auto`}>
+              Review them
+            </Link>
+          )}
+        </section>
+      )}
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Scene tags</h2>
@@ -187,6 +233,25 @@ function SubtypeForm({
         <span className="flex-1" />
         <SubmitButton>{subtype ? "Save subtype" : "Add subtype"}</SubmitButton>
       </div>
+    </ActionForm>
+  );
+}
+
+function DeleteForm({
+  action,
+  id,
+  label,
+  confirm,
+}: {
+  action: typeof deleteSubtypeAction;
+  id: number;
+  label: string;
+  confirm: string;
+}) {
+  return (
+    <ActionForm action={action}>
+      <input type="hidden" name="id" value={id} />
+      <SubmitButton className={buttonDanger} confirm={confirm}>{label}</SubmitButton>
     </ActionForm>
   );
 }

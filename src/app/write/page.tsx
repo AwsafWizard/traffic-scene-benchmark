@@ -9,7 +9,9 @@ import QuestionForm, { type FormImage, type FormTopic } from "./QuestionForm";
 export default async function WritePage({ searchParams }: PageProps<"/write">) {
   const user = await requireAnnotator();
   const { topic } = await searchParams;
-  const { sprint, topics } = await myTopics(user.id);
+  const { sprint, topics: all } = await myTopics(user.id);
+  // A topic whose subtypes were all hidden or deleted has nothing left to write in.
+  const topics = all.filter((t) => t.subtypes.length > 0);
 
   if (sprint?.status !== "writing") {
     return (

@@ -3,7 +3,7 @@ import { requireAdmin } from "@/server/auth";
 import { listConnections, PRESETS, type Connection } from "@/server/connections";
 import { listModels, modelSpend, type Model } from "@/server/models";
 import { encryptionConfigured } from "@/server/secrets";
-import { deleteConnectionAction, saveConnectionAction, saveModelAction } from "../../actions/admin";
+import { deleteConnectionAction, deleteModelAction, saveConnectionAction, saveModelAction } from "../../actions/admin";
 import { Notice, PageHeader } from "../../ui/components";
 import SubmitButton from "../../ui/SubmitButton";
 import { buttonDanger, buttonSecondary, card, hint, input, label, select } from "../../ui/styles";
@@ -86,6 +86,19 @@ export default async function ModelsPage() {
                       </span>
                     </summary>
                     <ModelForm model={m} connections={connections} />
+                    <ActionForm action={deleteModelAction} className="bg-background/50 px-4 pb-4">
+                      <input type="hidden" name="id" value={m.id} />
+                      <SubmitButton
+                        className={buttonDanger}
+                        confirm={
+                          m.answers > 0
+                            ? `Delete ${m.name} and its ${m.answers} recorded answer(s)? This can't be undone. To keep the answers, untick "In use" instead.`
+                            : `Delete ${m.name}?`
+                        }
+                      >
+                        Delete model
+                      </SubmitButton>
+                    </ActionForm>
                   </details>
                 );
               })}

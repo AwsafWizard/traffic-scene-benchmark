@@ -5,7 +5,8 @@ import { FLAG_LABEL, type FlagReason } from "@/server/engine";
 import { buildPrompt, listModels, newOrder } from "@/server/models";
 import { imageSrc } from "@/server/storage";
 import { questionDetail } from "@/server/stats";
-import { manualModelAnswerAction, reviewAction, runModelAction } from "../../../actions/admin";
+import { getTaxonomy } from "@/server/taxonomy";
+import { manualModelAnswerAction, moveQuestionAction, reviewAction, runModelAction } from "../../../actions/admin";
 import { PageHeader, StatusBadge, VBadge } from "../../../ui/components";
 import SubmitButton from "../../../ui/SubmitButton";
 import ZoomImage from "../../../ui/ZoomImage";
@@ -38,7 +39,7 @@ export default async function AdminQuestionPage({ params }: PageProps<"/admin/qu
   if (!/^[0-9a-f-]{36}$/.test(id)) notFound();
   const q = await questionDetail(id);
   if (!q) notFound();
-  const models = await listModels({ activeOnly: true });
+  const [models, taxonomy] = await Promise.all([listModels({ activeOnly: true }), getTaxonomy()]);
 
   const optionText = (choice: string | null, note: string | null) => {
     if (choice === null) return <span className="text-muted">not answered yet</span>;
@@ -99,6 +100,35 @@ export default async function AdminQuestionPage({ params }: PageProps<"/admin/qu
           )}
           {q.admin_note && <p className="text-sm text-muted">Admin note: {q.admin_note}</p>}
         </section>
+
+        <details className={card} open={q.uncategorised}>
+          <summary className="cursor-pointer p-4 text-sm">
+            {q.uncategorised ? (
+              <span className="text-amber-700 dark:text-amber-400">
+                Uncategorised{q.former_subtype && <> — its subtype {q.former_subtype} was deleted</>}. File it under a subtype.
+              </span>
+            ) : (
+              <span className="text-accent">Move to another subtype</span>
+            )}
+          </summary>
+          <ActionForm action={moveQuestionAction} className="flex flex-wrap items-end gap-2 border-t border-line p-4">
+            <input type="hidden" name="question_id" value={q.id} />
+            <select name="subtype_id" defaultValue={q.uncategorised ? "" : q.subtype_id} required className={`${select} max-w-md flex-1`} aria-label="Subtype">
+              <option value="" disabled>Pick a subtype</option>
+              {taxonomy.filter((c) => !c.system).map((c) => (
+                <optgroup key={c.id} label={`${c.code}. ${c.name}`}>
+                  {c.subtypes.map((s) => <option key={s.id} value={s.id}>{s.code} {s.name} ({s.verifiability})</option>)}
+                </optgroup>
+              ))}
+            </select>
+            <SubmitButton className={buttonSecondary}>Move</SubmitButton>
+            <p className="w-full text-xs text-muted">
+              {q.status === "written"
+                ? "It takes the new subtype's verifiability."
+                : `It keeps the verifiability it was checked under (${q.verifiability}).`}
+            </p>
+          </ActionForm>
+        </details>
 
         <section className={`${card} overflow-x-auto`}>
           <h2 className="px-4 pt-4 font-medium">Checks</h2>

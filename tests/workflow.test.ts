@@ -37,6 +37,8 @@ describe.skipIf(!reachable)("sprint workflow", () => {
     checks: typeof import("../src/server/checks");
     stats: typeof import("../src/server/stats");
     exporter: typeof import("../src/server/export");
+    taxonomy: typeof import("../src/server/taxonomy");
+    models: typeof import("../src/server/models");
   };
   const ids: Record<string, string> = {};
   let sprintId = 0;
@@ -65,6 +67,8 @@ describe.skipIf(!reachable)("sprint workflow", () => {
       checks: await import("../src/server/checks"),
       stats: await import("../src/server/stats"),
       exporter: await import("../src/server/export"),
+      taxonomy: await import("../src/server/taxonomy"),
+      models: await import("../src/server/models"),
     };
     for (const row of await m.sql<{ id: number; code: string }[]>`select id, code from subtypes`) subtype[row.code] = row.id;
   });
@@ -344,5 +348,46 @@ describe.skipIf(!reachable)("sprint workflow", () => {
     await m.users.setAnnotatorActive(ids.admin, ids.dan, false);
     const [row] = await m.sql<{ n: number }[]>`select count(*)::int as n from sessions where user_id = ${ids.dan}`;
     expect(row.n).toBe(0);
+  });
+
+  it("deleting a subtype moves its questions and topic to Uncategorised, and they can be filed again", async () => {
+    const [u] = await m.sql<{ id: number; category_id: number }[]>`select id, category_id from subtypes where system`;
+    const result = await m.taxonomy.deleteSubtype(subtype["8.1"]);
+    expect(result).toEqual({ ok: true, questions: 2, topics: 1 });
+    const moved = await m.sql<{ subtype_id: number; former_subtype: string; verifiability: string }[]>`
+      select subtype_id, former_subtype, verifiability from questions where id in ${m.sql([question.dan1, question.dan2])}`;
+    expect(moved.every((q) => q.subtype_id === u.id && q.former_subtype.startsWith("8.1 "))).toBe(true);
+    const [topic] = await m.sql<{ category_id: number; subtype_id: number }[]>`
+      select category_id, subtype_id from assignments where annotator_id = ${ids.dan} and sprint_id = ${sprintId}`;
+    expect(topic).toEqual({ category_id: u.category_id, subtype_id: u.id });
+    expect((await m.stats.questionDetail(question.dan1))?.uncategorised).toBe(true);
+
+    expect((await m.taxonomy.deleteSubtype(u.id)).ok).toBe(false);
+    expect((await m.taxonomy.deleteCategory(u.category_id)).ok).toBe(false);
+
+    // Checked questions keep the verifiability they were checked under.
+    expect(await m.taxonomy.moveQuestionToSubtype(question.dan1, subtype["8.2"])).toEqual({ ok: true });
+    const [filed] = await m.sql<{ subtype_id: number; former_subtype: string | null; verifiability: string }[]>`
+      select subtype_id, former_subtype, verifiability from questions where id = ${question.dan1}`;
+    expect(filed).toEqual({ subtype_id: subtype["8.2"], former_subtype: null, verifiability: moved[0].verifiability });
+  });
+
+  it("deletes a type only once its subtypes are gone", async () => {
+    const [category] = await m.sql<{ id: number }[]>`insert into categories (code, name) values ('T', 'Temp') returning id`;
+    const [st] = await m.sql<{ id: number }[]>`
+      insert into subtypes (category_id, code, name, verifiability) values (${category.id}, 'T.1', 'Temp', 'V') returning id`;
+    expect((await m.taxonomy.deleteCategory(category.id)).ok).toBe(false);
+    expect((await m.taxonomy.deleteSubtype(st.id)).ok).toBe(true);
+    expect((await m.taxonomy.deleteCategory(category.id)).ok).toBe(true);
+  });
+
+  it("deleting a model removes its answers", async () => {
+    const [model] = await m.sql<{ id: number }[]>`insert into models (name, provider) values ('Temp model', 'Test') returning id`;
+    await m.sql`insert into model_answers (question_id, model_id, chosen_option, source) values (${question.ann1}, ${model.id}, 'a', 'manual')`;
+    expect((await m.models.listModels()).find((x) => x.id === model.id)?.answers).toBe(1);
+    expect(await m.models.deleteModel(ids.admin, model.id)).toEqual({ ok: true });
+    const [left] = await m.sql<{ n: number }[]>`select count(*)::int as n from model_answers where model_id = ${model.id}`;
+    expect(left.n).toBe(0);
+    expect((await m.models.deleteModel(ids.admin, model.id)).ok).toBe(false);
   });
 });
