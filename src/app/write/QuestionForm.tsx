@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import {
   createQuestionAction,
   getUploadTicketAction,
@@ -45,12 +45,14 @@ interface Initial {
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const MAX_SIDE = 4096;
+const STORED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
 /**
  * Re-encodes an image as WebP at full resolution (quality 0.9) before upload.
  * That's about 7× smaller than the PNG frames we tested, with no visible loss.
  * Falls back to JPEG where a browser can't write WebP, and keeps the original
- * if re-encoding wouldn't make it smaller.
+ * if re-encoding wouldn't make it smaller. Formats we don't store (a pasted BMP
+ * or GIF, say) are always re-encoded.
  */
 async function compress(file: File): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
@@ -63,7 +65,15 @@ async function compress(file: File): Promise<Blob> {
   let blob = await encode("image/webp");
   if (!blob || blob.type !== "image/webp") blob = await encode("image/jpeg");
   if (!blob) return file;
-  return blob.size < file.size || scale < 1 ? blob : file;
+  return blob.size < file.size || scale < 1 || !STORED_TYPES.includes(file.type) ? blob : file;
+}
+
+/** The first image on the clipboard of a paste event, if there is one. */
+function pastedImage(data: DataTransfer | null): File | null {
+  for (const item of Array.from(data?.items ?? [])) {
+    if (item.kind === "file" && item.type.startsWith("image/")) return item.getAsFile();
+  }
+  return null;
 }
 
 export default function QuestionForm({
@@ -104,8 +114,8 @@ export default function QuestionForm({
 
   async function upload(file: File) {
     setError(null);
-    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-      setError("Use a JPG, PNG or WebP image.");
+    if (!file.type.startsWith("image/")) {
+      setError("That isn't an image.");
       return;
     }
     setUploading(true);
@@ -180,6 +190,34 @@ export default function QuestionForm({
     setOptions(["", ""]);
     setCorrect(-1);
     router.refresh();
+  }
+
+  // Ctrl+V / ⌘V anywhere on the page uploads a copied image. Pastes without an
+  // image (ordinary text into the question or options) are left alone.
+  const onPaste = useEffectEvent((event: ClipboardEvent) => {
+    const file = pastedImage(event.clipboardData);
+    if (!file || uploading) return;
+    event.preventDefault();
+    upload(file);
+  });
+  useEffect(() => {
+    const handler = (event: ClipboardEvent) => onPaste(event);
+    window.addEventListener("paste", handler);
+    return () => window.removeEventListener("paste", handler);
+  }, []);
+
+  /** For the button: reads the clipboard directly, where the browser allows it. */
+  async function pasteFromClipboard() {
+    setError(null);
+    try {
+      for (const item of await navigator.clipboard.read()) {
+        const type = item.types.find((t) => t.startsWith("image/"));
+        if (type) return upload(new File([await item.getType(type)], `pasted.${type.split("/")[1]}`, { type }));
+      }
+      setError("There's no image on the clipboard. Copy one first.");
+    } catch {
+      setError("The browser didn't allow reading the clipboard. Press Ctrl+V (⌘V on a Mac) instead.");
+    }
   }
 
   const visibleImages = showAllImages ? images : images.slice(0, 11);
@@ -296,13 +334,18 @@ export default function QuestionForm({
         <section className={`${card} space-y-3 p-5`}>
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium">Image</span>
-            <button type="button" className={buttonSecondary} disabled={uploading} onClick={() => fileInput.current?.click()}>
-              {uploading ? "Uploading…" : "Upload new"}
-            </button>
+            <span className="flex gap-2">
+              <button type="button" className={buttonSecondary} disabled={uploading} onClick={pasteFromClipboard}>
+                Paste image
+              </button>
+              <button type="button" className={buttonSecondary} disabled={uploading} onClick={() => fileInput.current?.click()}>
+                {uploading ? "Uploading…" : "Upload new"}
+              </button>
+            </span>
             <input
               ref={fileInput}
               type="file"
-              accept="image/jpeg,image/png,image/webp"
+              accept="image/*"
               className="hidden"
               onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])}
             />
@@ -312,7 +355,7 @@ export default function QuestionForm({
             <img src={image.src} alt="Selected scene" className="w-full rounded-lg border border-line object-contain" />
           ) : (
             <p className="rounded-lg border border-dashed border-line p-6 text-center text-sm text-muted">
-              Upload a scene, or pick one you uploaded before.
+              Upload a scene, paste one with Ctrl+V (⌘V on a Mac), or pick one you uploaded before.
             </p>
           )}
 
