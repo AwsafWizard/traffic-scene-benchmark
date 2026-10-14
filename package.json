@@ -1,29 +1,42 @@
 {
-  "name": "traffic-scene-benchmark",
+  "name": "dhakavqa-annotation",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:partner": "BENCH_DATA_DIR=data-partner NEXT_DIST_DIR=.next-partner next dev --port 3001",
-    "build": "next build",
+    "db:dev": "tsx scripts/dev-db.ts",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "build": "tsx scripts/migrate.ts && next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:seed-dev": "tsx scripts/seed-dev.ts"
   },
   "dependencies": {
-    "better-sqlite3": "^12.11.1",
+    "@anthropic-ai/sdk": "^0.133.0",
+    "cloudinary": "^2.11.0",
     "next": "16.3.4",
+    "postgres": "^3.4.9",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "server-only": "^0.0.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "embedded-postgres": "^17.10.0-beta.17",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "tsx": "^4.23.15",
+    "typescript": "^5",
+    "vitest": "^3.2.7"
+  },
+  "engines": {
+    "node": ">=20.12"
   }
 }

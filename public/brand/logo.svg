@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 650 140" width="100%" height="100%">
+  <rect width="650" height="140" fill="#FFFFFF" />
+
+  <!-- ================= ICON (ORIGIN VECTOR) ================= -->
+  <g transform="translate(45, 30)" stroke="#111827" fill="none">
+    <!-- Shape 1: Open Vision Frame / X-Y Axes -->
+    <path d="M 52,0 H 0 V 80 H 80 V 28" stroke-width="8" stroke-linecap="square" />
+    
+    <!-- Shape 2: Bold Diagonal Vector Anchored at Bottom-Left Origin -->
+    <line x1="0" y1="80" x2="70" y2="10" stroke-width="8" stroke-linecap="round" />
+    <circle cx="70" cy="10" r="12" fill="#111827" stroke="none" />
+  </g>
+
+  <!-- ================= CONTINUOUS SERIF WORDMARK ================= -->
+  <text x="155" y="86" font-family="'Times New Roman', Times, Georgia, serif" font-size="54" fill="#111827">
+    <tspan font-weight="bold">DhakaDrive</tspan><tspan font-weight="normal">VQA</tspan>
+  </text>
+</svg>
