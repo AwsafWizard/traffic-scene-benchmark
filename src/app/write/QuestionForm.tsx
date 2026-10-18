@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import {
@@ -11,6 +12,10 @@ import {
 } from "../actions/annotator";
 import { VBadge } from "../ui/components";
 import { button, buttonSecondary, card, hint, input, label, select } from "../ui/styles";
+import type { LibraryVideo, VideoFrame } from "./VideoFramePicker";
+
+// Browser-only: it reads localStorage as it renders and has nothing to show before then.
+const VideoFramePicker = dynamic(() => import("./VideoFramePicker"), { ssr: false });
 
 export interface FormTopic {
   assignmentId: number;
@@ -24,6 +29,9 @@ export interface FormImage {
   id: string;
   src: string;
   tagIds: number[];
+  /** The video and second a captured frame came from. */
+  sourceVideo?: string | null;
+  sourceTime?: number | null;
 }
 
 interface TagGroupView {
@@ -68,6 +76,10 @@ async function compress(file: File): Promise<Blob> {
   return blob.size < file.size || scale < 1 || !STORED_TYPES.includes(file.type) ? blob : file;
 }
 
+function clock(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${(seconds % 60).toFixed(1).padStart(4, "0")}`;
+}
+
 /** The first image on the clipboard of a paste event, if there is one. */
 function pastedImage(data: DataTransfer | null): File | null {
   for (const item of Array.from(data?.items ?? [])) {
@@ -83,6 +95,8 @@ export default function QuestionForm({
   tagGroups,
   initial,
   resubmit,
+  videosEnabled,
+  videos,
 }: {
   mode: "create" | "edit";
   topics: FormTopic[];
@@ -91,6 +105,10 @@ export default function QuestionForm({
   initial: Initial;
   /** Saving this edit also resubmits the question; asked to confirm with this text. */
   resubmit?: string;
+  /** False when the server can't play library videos (no Hugging Face token). */
+  videosEnabled: boolean;
+  /** The admin's video library, for capturing frames. */
+  videos: LibraryVideo[];
 }) {
   const router = useRouter();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -115,11 +133,12 @@ export default function QuestionForm({
     return tagGroups.filter((g) => g.required && !g.tags.some((t) => image.tagIds.includes(t.id))).map((g) => g.name);
   }, [image, tagGroups]);
 
-  async function upload(file: File) {
+  /** Uploads an image and selects it. Resolves true once it's saved. */
+  async function upload(file: File, source: VideoFrame["source"] | null = null): Promise<boolean> {
     setError(null);
     if (!file.type.startsWith("image/")) {
       setError("That isn't an image.");
-      return;
+      return false;
     }
     setUploading(true);
     try {
@@ -132,6 +151,7 @@ export default function QuestionForm({
       for (const [key, value] of Object.entries(ticket.fields)) form.append(key, value);
       const ext = blob.type === "image/webp" ? "webp" : blob.type === "image/png" ? "png" : "jpg";
       form.append("file", new File([blob], `scene.${ext}`, { type: blob.type }));
+      if (ticket.mode === "local" && source) form.append("source", JSON.stringify(source));
       const response = await fetch(ticket.url, { method: "POST", body: form });
       const body = await response.json();
       if (!response.ok) throw new Error(body?.error?.message ?? body?.error ?? "Upload failed.");
@@ -148,14 +168,18 @@ export default function QuestionForm({
           height: body.height,
           bytes: body.bytes,
           format: body.format,
-        });
+        }, source);
         if ("error" in registered) throw new Error(registered.error);
         added = { id: registered.id, src: registered.src, tagIds: [] };
       }
+      added.sourceVideo = source?.video ?? null;
+      added.sourceTime = source?.time ?? null;
       setImages((list) => [added, ...list]);
       setImageId(added.id);
+      return true;
     } catch (e) {
       setError((e as Error).message);
+      return false;
     } finally {
       setUploading(false);
       if (fileInput.current) fileInput.current.value = "";
@@ -342,6 +366,12 @@ export default function QuestionForm({
       </div>
 
       <div className="space-y-4 lg:sticky lg:top-6 lg:self-start">
+        <VideoFramePicker
+          enabled={videosEnabled}
+          videos={videos}
+          busy={uploading}
+          onCapture={(frame) => upload(frame.file, frame.source)}
+        />
         <section className={`${card} space-y-3 p-5`}>
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium">Image</span>
@@ -362,11 +392,18 @@ export default function QuestionForm({
             />
           </div>
           {image ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={image.src} alt="Selected scene" className="w-full rounded-lg border border-line object-contain" />
+            <figure>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={image.src} alt="Selected scene" className="w-full rounded-lg border border-line object-contain" />
+              {image.sourceVideo && (
+                <figcaption className={hint}>
+                  Frame from {image.sourceVideo} at {clock(image.sourceTime ?? 0)}
+                </figcaption>
+              )}
+            </figure>
           ) : (
             <p className="rounded-lg border border-dashed border-line p-6 text-center text-sm text-muted">
-              Upload a scene, paste one with Ctrl+V (⌘V on a Mac), or pick one you uploaded before.
+              Capture a frame from a video, upload a scene, paste one with Ctrl+V (⌘V on a Mac), or pick one you uploaded before.
             </p>
           )}
 

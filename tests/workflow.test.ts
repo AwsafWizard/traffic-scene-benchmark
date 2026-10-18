@@ -39,6 +39,7 @@ describe.skipIf(!reachable)("sprint workflow", () => {
     exporter: typeof import("../src/server/export");
     taxonomy: typeof import("../src/server/taxonomy");
     models: typeof import("../src/server/models");
+    videos: typeof import("../src/server/videos");
   };
   const ids: Record<string, string> = {};
   let sprintId = 0;
@@ -69,6 +70,7 @@ describe.skipIf(!reachable)("sprint workflow", () => {
       exporter: await import("../src/server/export"),
       taxonomy: await import("../src/server/taxonomy"),
       models: await import("../src/server/models"),
+      videos: await import("../src/server/videos"),
     };
     for (const row of await m.sql<{ id: number; code: string }[]>`select id, code from subtypes`) subtype[row.code] = row.id;
   });
@@ -439,5 +441,42 @@ describe.skipIf(!reachable)("sprint workflow", () => {
     const [left] = await m.sql<{ n: number }[]>`select count(*)::int as n from model_answers where model_id = ${model.id}`;
     expect(left.n).toBe(0);
     expect((await m.models.deleteModel(ids.admin, model.id)).ok).toBe(false);
+  });
+
+  it("keeps a video library and counts the frames taken from each video", async () => {
+    const repo = "team/dhaka-videos";
+    const files = [
+      { path: "mirpur/a.mp4", size: 3_000_000_000 },
+      { path: "mirpur/b.mp4", size: null },
+      { path: "mirpur/night/c.mp4", size: 10 },
+      { path: "top.mp4", size: 10 },
+    ];
+    expect(m.videos.splitPath("mirpur/night/c.mp4")).toEqual({ folder: "mirpur / night", name: "c.mp4" });
+    expect(await m.videos.addVideos(ids.admin, repo, files)).toBe(4);
+    expect(await m.videos.addVideos(ids.admin, repo, files)).toBe(0);
+
+    await m.sql`
+      insert into images (uploader_id, storage, storage_key, format, source_repo, source_video, source_time)
+      values (${ids.ann}, 'local', 'frame-1.png', 'png', ${repo}, 'mirpur/a.mp4', 12.5),
+             (${ids.ann}, 'local', 'frame-2.png', 'png', ${repo}, 'mirpur/a.mp4', 40),
+             (${ids.bob}, 'local', 'frame-3.png', 'png', ${repo}, 'mirpur/a.mp4', 3)`;
+    const all = await m.videos.listVideos();
+    const byPath = (path: string) => all.find((v) => v.path === path)!;
+    expect(byPath("mirpur/a.mp4")).toMatchObject({ frames: 3, size_bytes: 3_000_000_000, folder: "mirpur", name: "a.mp4" });
+    expect((await m.videos.myFrameCounts(ids.ann)).get(byPath("mirpur/a.mp4").id)).toBe(2);
+
+    // A folder switch reaches only that folder's own videos, not its subfolders or the top level.
+    const activePaths = async () => (await m.videos.listVideos({ activeOnly: true })).map((v) => v.path);
+    await m.videos.setFolderActive(ids.admin, repo, "mirpur", false);
+    expect(await activePaths()).toEqual(["mirpur/night/c.mp4", "top.mp4"]);
+    await m.videos.setFolderActive(ids.admin, repo, "", false);
+    expect(await activePaths()).toEqual(["mirpur/night/c.mp4"]);
+    await m.videos.setVideoActive(ids.admin, byPath("mirpur/b.mp4").id, true);
+    expect(await activePaths()).toEqual(["mirpur/b.mp4", "mirpur/night/c.mp4"]);
+
+    // Removing a video from the library leaves its frames alone.
+    await m.videos.deleteVideo(ids.admin, byPath("mirpur/a.mp4").id);
+    const [frames] = await m.sql<{ n: number }[]>`select count(*)::int as n from images where source_video = 'mirpur/a.mp4'`;
+    expect(frames.n).toBe(3);
   });
 });

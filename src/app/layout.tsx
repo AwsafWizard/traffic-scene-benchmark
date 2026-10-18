@@ -24,10 +24,9 @@ const ADMIN_NAV = [
   { href: "/admin", label: "Overview" },
   { href: "/admin/sprints", label: "Sprints" },
   { href: "/admin/questions", label: "Questions" },
-  { href: "/admin/annotators", label: "Annotators" },
-  { href: "/admin/taxonomy", label: "Taxonomy" },
-  { href: "/admin/models", label: "Models" },
   { href: "/admin/export", label: "Export" },
+  // Annotators, videos, models, taxonomy and the admin account, as tabs.
+  { href: "/admin/settings", label: "Settings" },
 ];
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {

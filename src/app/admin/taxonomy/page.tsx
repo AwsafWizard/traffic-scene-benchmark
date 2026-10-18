@@ -13,6 +13,7 @@ import { PageHeader, VBadge } from "../../ui/components";
 import SubmitButton from "../../ui/SubmitButton";
 import { buttonDanger, buttonSecondary, card, hint, input, label, select } from "../../ui/styles";
 import ActionForm from "../ActionForm";
+import SettingsTabs from "../SettingsTabs";
 
 export default async function TaxonomyPage() {
   await requireAdmin();
@@ -23,6 +24,7 @@ export default async function TaxonomyPage() {
 
   return (
     <div className="space-y-8">
+      <SettingsTabs />
       <PageHeader
         title="Taxonomy"
         sub="Types, subtypes and scene tags. Changes apply to new questions; existing questions keep the verifiability they were written with. Deleting a subtype moves its questions to Uncategorised, where you can file them again."
