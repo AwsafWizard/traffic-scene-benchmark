@@ -5,6 +5,8 @@ import { FLAG_LABEL, type FlagReason } from "@/server/engine";
 import { editRestartsChecking, getQuestion, listMyImages, setterCanEdit } from "@/server/questions";
 import { imageSrc } from "@/server/storage";
 import { getTagGroups } from "@/server/taxonomy";
+import { hfConfigured } from "@/server/hf";
+import { listVideos, myFrameCounts } from "@/server/videos";
 import { deleteQuestionAction, resubmitQuestionAction } from "../../actions/annotator";
 import { Notice, PageHeader } from "../../ui/components";
 import SubmitButton from "../../ui/SubmitButton";
@@ -41,7 +43,15 @@ export default async function EditQuestionPage({ params }: PageProps<"/questions
     select id, code, name, verifiability from subtypes
     where category_id = ${meta.category_id} and ${meta.topic_subtype ? sql`id = ${meta.topic_subtype}` : sql`(active or id = ${question.subtype_id})`}
     order by sort, code`;
-  const images = (await listMyImages(user.id)).map((i) => ({ id: i.id, src: imageSrc(i, 900), tagIds: i.tag_ids }));
+  const images = (await listMyImages(user.id)).map((i) => ({
+    id: i.id,
+    src: imageSrc(i, 900),
+    tagIds: i.tag_ids,
+    sourceVideo: i.source_video,
+    sourceTime: i.source_time,
+  }));
+  const [library, myFrames] = await Promise.all([listVideos({ activeOnly: true }), myFrameCounts(user.id)]);
+  const videos = library.map((v) => ({ id: v.id, repo: v.repo, path: v.path, name: v.name, folder: v.folder, frames: myFrames.get(v.id) ?? 0 }));
   const tagGroups = (await getTagGroups({ activeOnly: true })).map((g) => ({
     id: g.id,
     name: g.name,
@@ -87,6 +97,8 @@ export default async function EditQuestionPage({ params }: PageProps<"/questions
         topics={[{ assignmentId: question.assignment_id, label: meta.label, written: 0, target: 0, subtypes }]}
         images={images}
         tagGroups={tagGroups}
+        videosEnabled={hfConfigured()}
+        videos={videos}
         initial={{
           assignmentId: question.assignment_id,
           subtypeId: question.subtype_id,

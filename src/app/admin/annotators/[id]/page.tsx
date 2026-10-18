@@ -9,6 +9,7 @@ import { PageHeader, pct, Stat, VBadge } from "../../../ui/components";
 import SubmitButton from "../../../ui/SubmitButton";
 import { buttonDanger, buttonSecondary, card, input, td, th } from "../../../ui/styles";
 import ActionForm from "../../ActionForm";
+import SettingsTabs from "../../SettingsTabs";
 import { resolveScope, ScopePicker } from "../../scope";
 
 const JUDGMENT_LABEL: Record<string, string> = {
@@ -35,6 +36,7 @@ export default async function AnnotatorPage({ params, searchParams }: PageProps<
 
   return (
     <div className="space-y-6">
+      <SettingsTabs />
       <PageHeader
         title={person.display_name}
         sub={<>{person.number !== null && <>Setter {String(person.number).padStart(2, "0")} · </>}@{person.username} · {person.active ? "active" : "revoked"} · last sign-in {person.last_login_at ? person.last_login_at.toLocaleString() : "never"}</>}

@@ -6,6 +6,7 @@ import { PageHeader, pct } from "../../ui/components";
 import SubmitButton from "../../ui/SubmitButton";
 import { card, input, label, td, th } from "../../ui/styles";
 import ActionForm from "../ActionForm";
+import SettingsTabs from "../SettingsTabs";
 import { resolveScope, ScopePicker } from "../scope";
 
 export default async function AnnotatorsPage({ searchParams }: PageProps<"/admin/annotators">) {
@@ -15,6 +16,7 @@ export default async function AnnotatorsPage({ searchParams }: PageProps<"/admin
 
   return (
     <div className="space-y-6">
+      <SettingsTabs />
       <PageHeader
         title="Annotators"
         sub="Create accounts, hand out passwords, and see how each person's work is going."

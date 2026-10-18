@@ -2,14 +2,16 @@ import type { NextConfig } from "next";
 
 const dev = process.env.NODE_ENV !== "production";
 
-// Images come from Cloudinary (signed URLs) and uploads go straight to its API;
-// nothing else outside our own origin is allowed.
+// Images come from Cloudinary (signed URLs) and uploads go straight to its API.
+// Videos on the write page stream from Hugging Face's CDN through signed links.
+// Nothing else outside our own origin is allowed.
 const csp = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${dev ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https://res.cloudinary.com",
   "font-src 'self'",
+  "media-src 'self' https://*.hf.co https://*.huggingface.co",
   "connect-src 'self' https://api.cloudinary.com",
   "frame-ancestors 'none'",
   "form-action 'self'",

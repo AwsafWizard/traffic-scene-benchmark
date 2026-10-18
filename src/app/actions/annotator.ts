@@ -13,14 +13,18 @@ import {
   updateQuestion,
   type QuestionInput,
 } from "@/server/questions";
+import { videoLink } from "@/server/hf";
 import type { Result } from "@/server/sprints";
 import {
+  cleanVideoSource,
   imageSrc,
   registerCloudinaryUpload,
   uploadTicket,
   type CloudinaryUploadResult,
   type UploadTicket,
+  type VideoSource,
 } from "@/server/storage";
+import { getVideo } from "@/server/videos";
 
 /** Every action re-checks the session itself: server actions are reachable by direct POST. */
 async function annotator() {
@@ -42,15 +46,31 @@ export async function getUploadTicketAction(): Promise<UploadTicket | { error: s
   }
 }
 
-export async function registerUploadAction(result: CloudinaryUploadResult): Promise<{ id: string; src: string } | { error: string }> {
+export async function registerUploadAction(
+  result: CloudinaryUploadResult,
+  source: VideoSource | null = null,
+): Promise<{ id: string; src: string } | { error: string }> {
   try {
     const user = await annotator();
-    const id = await registerCloudinaryUpload(user.id, result);
+    const id = await registerCloudinaryUpload(user.id, result, cleanVideoSource(source));
     const [image] = await sql<{ id: string; storage: "cloudinary"; storage_key: string; version: string }[]>`
       select id, storage, storage_key, version from images where id = ${id}`;
     return { id, src: imageSrc(image, 900) };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Upload failed." };
+  }
+}
+
+/** A link that plays one library video for about an hour. */
+export async function videoLinkAction(videoId: number): Promise<{ url: string; expiresAt: number } | { error: string }> {
+  try {
+    await annotator();
+    const video = await getVideo(Number(videoId));
+    if (!video?.active) return { error: "That video isn't available any more." };
+    return await videoLink(video.repo, video.path);
+  } catch (error) {
+    if (error instanceof AuthError) return { error: error.message };
+    return { error: error instanceof Error ? error.message : "Couldn't open the video." };
   }
 }
 

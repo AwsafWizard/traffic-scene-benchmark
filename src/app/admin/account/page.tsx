@@ -5,6 +5,7 @@ import { PageHeader } from "../../ui/components";
 import SubmitButton from "../../ui/SubmitButton";
 import { card, input, label, td, th } from "../../ui/styles";
 import ActionForm from "../ActionForm";
+import SettingsTabs from "../SettingsTabs";
 
 export default async function AccountPage() {
   const me = await requireAdmin();
@@ -14,6 +15,7 @@ export default async function AccountPage() {
 
   return (
     <div className="space-y-6">
+      <SettingsTabs />
       <PageHeader title="Admin account" sub={`Signed in as ${me.username}`} />
       <ActionForm action={changePasswordAction} className={`${card} grid max-w-md gap-3 p-5`}>
         <h2 className="font-medium">Change your password</h2>

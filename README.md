@@ -116,7 +116,11 @@ Only our server talks to the database. Every table has row-level security on wit
 
 From **Settings → API Keys**: the cloud name, API key and API secret. Images are uploaded as *authenticated* assets — nothing is reachable without a URL our server signed.
 
-### 3. Vercel (the app)
+### 3. Hugging Face (videos, optional)
+
+The admin adds dashcam videos under **Settings → Videos**, and setters capture full-resolution frames from them on the write page. Videos live in a **private dataset repo** on Hugging Face (free up to 100 GB of private storage; folders in the repo show up as groups). Make a **fine-grained access token** with only *Read access to contents of selected repos* for that repo, and set it as `HF_TOKEN`. The token stays on the server: a setter opening a video gets a signed link to that one file, valid for about an hour, which the browser streams from Hugging Face's CDN. (Google Drive and YouTube were tried and don't work for this: Drive stops serving a heavily streamed file for about a day, and YouTube's player can't be read from.) Without the token, setters can only upload or paste images.
+
+### 4. Vercel (the app)
 
 Import the GitHub repository. Under **Settings → Environment Variables**, set:
 
@@ -127,14 +131,15 @@ Import the GitHub repository. Under **Settings → Environment Variables**, set:
 | `ADMIN_PASSWORD` | the admin's first password (10+ characters) |
 | `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | from Cloudinary |
 | `ENCRYPTION_KEY` | 32 random bytes, base64 (command in `.env.example`); encrypts the provider API keys added on the Models page |
+| `HF_TOKEN` | optional: the Hugging Face read token above, for the video library |
 
 The build runs the database migrations first (`npm run build`), so every deploy brings the schema up to date, and the first one creates the admin account. Under **Settings → Functions**, set the region closest to the Supabase project's region, since every page makes several database queries.
 
-### 4. Domain
+### 5. Domain
 
 In Vercel, **Settings → Domains → Add** `dhakavqa.triips.org`. Vercel shows a CNAME record to create. **Add it in Cloudflare**, which hosts triips.org's DNS (a record added in cPanel has no effect), with the proxy set to *DNS only*.
 
-### 5. Backups
+### 6. Backups
 
 `.github/workflows/backup.yml` dumps the database every night, encrypts it, and keeps it as a workflow artifact for 30 days. Add two repository secrets: `BACKUP_DATABASE_URL` (Supabase's **Session pooler** string, port 5432) and `BACKUP_PASSPHRASE` (keep a copy somewhere safe). Run it once by hand from the Actions tab to check it. Restore instructions are at the top of the workflow file.
 

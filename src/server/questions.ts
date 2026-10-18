@@ -262,13 +262,15 @@ export async function getQuestion(id: string): Promise<QuestionRecord | null> {
 
 export interface MyImage extends StoredImage {
   created_at: Date;
+  source_video: string | null;
+  source_time: number | null;
   tag_ids: number[];
   questions: number;
 }
 
 export async function listMyImages(userId: string): Promise<MyImage[]> {
   return sql<MyImage[]>`
-    select i.id, i.storage, i.storage_key, i.version, i.created_at,
+    select i.id, i.storage, i.storage_key, i.version, i.created_at, i.source_video, i.source_time,
       coalesce(array_agg(distinct it.tag_id) filter (where it.tag_id is not null), '{}') as tag_ids,
       (select count(*)::int from questions q where q.image_id = i.id) as questions
     from images i left join image_tags it on it.image_id = i.id

@@ -1,5 +1,5 @@
-import Link from "next/link";
 import { listSprints } from "@/server/sprints";
+import SprintMenu, { type SprintOption } from "./SprintMenu";
 
 /**
  * Most admin views can be scoped to one sprint or all of them, via ?sprint=.
@@ -23,23 +23,12 @@ export function ScopePicker({
   extra = {},
 }: {
   path: string;
-  sprints: { id: number; name: string }[];
+  sprints: SprintOption[];
   value: string;
   extra?: Record<string, string>;
 }) {
   const href = (sprint: string) => `${path}?${new URLSearchParams({ ...extra, sprint }).toString()}`;
-  const pill = (active: boolean) =>
-    `rounded-full border px-3 py-1 text-xs transition ${active ? "border-accent bg-accent text-white" : "border-line hover:bg-background"}`;
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {sprints.map((s) => (
-        <Link key={s.id} href={href(String(s.id))} className={pill(value === String(s.id))}>
-          {s.name}
-        </Link>
-      ))}
-      <Link href={href("all")} className={pill(value === "all")}>
-        All sprints
-      </Link>
-    </div>
-  );
+  const hrefs = Object.fromEntries([...sprints.map((s) => [s.id, href(String(s.id))]), ["all", href("all")]]);
+  const options = sprints.map(({ id, name, status, questions }) => ({ id, name, status, questions }));
+  return <SprintMenu sprints={options} value={value} hrefs={hrefs} />;
 }

@@ -18,7 +18,8 @@ export async function exportRecords(f: ExportFilters) {
     select q.id, q.code, q.prompt, q.options, q.correct_option, q.status, q.resolution, q.admin_note, q.verifiability,
       q.created_at, s.name as sprint, c.code as category_code, c.name as category_name,
       st.code as subtype_code, st.name as subtype_name, u.username as setter,
-      i.id as image_id, i.storage, i.storage_key, i.version, i.width, i.height
+      i.id as image_id, i.storage, i.storage_key, i.version, i.width, i.height,
+      i.source_repo, i.source_video, i.source_time
     from questions q join sprints s on s.id = q.sprint_id join subtypes st on st.id = q.subtype_id
     join categories c on c.id = st.category_id join users u on u.id = q.author_id join images i on i.id = q.image_id
     where ${f.sprintId ? sql`q.sprint_id = ${f.sprintId}` : sql`true`}
@@ -65,6 +66,9 @@ export async function exportRecords(f: ExportFilters) {
         url: imageSrc({ id: q.image_id, storage: q.storage, storage_key: q.storage_key, version: q.version }),
         width: q.width as number | null,
         height: q.height as number | null,
+        source_repo: q.source_repo as string | null,
+        source_video: q.source_video as string | null,
+        source_time: q.source_time as number | null,
       },
       tags: tagMap,
       checks: checks

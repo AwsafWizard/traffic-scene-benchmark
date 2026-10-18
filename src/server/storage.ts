@@ -70,6 +70,23 @@ export function uploadTicket(userId: string): UploadTicket {
   };
 }
 
+/** The library video a captured frame came from: its repo, its path there, and the second. Manual uploads have none. */
+export interface VideoSource {
+  repo: string;
+  video: string;
+  time: number;
+}
+
+/** Keeps only well-formed values: this comes from the browser. */
+export function cleanVideoSource(raw: unknown): VideoSource | null {
+  if (!raw || typeof raw !== "object") return null;
+  const { repo, video, time } = raw as Record<string, unknown>;
+  if (typeof repo !== "string" || !/^[\w.-]+\/[\w.-]+$/.test(repo)) return null;
+  if (typeof video !== "string" || !video.trim() || video.length > 500) return null;
+  if (typeof time !== "number" || !Number.isFinite(time) || time < 0) return null;
+  return { repo, video, time: Math.round(time * 1000) / 1000 };
+}
+
 export interface CloudinaryUploadResult {
   public_id: string;
   version: number | string;
@@ -85,7 +102,11 @@ export interface CloudinaryUploadResult {
  * response with our secret, so a forged or altered result is rejected, and the
  * public id has to sit in the uploader's own folder.
  */
-export async function registerCloudinaryUpload(userId: string, result: CloudinaryUploadResult): Promise<string> {
+export async function registerCloudinaryUpload(
+  userId: string,
+  result: CloudinaryUploadResult,
+  source: VideoSource | null = null,
+): Promise<string> {
   configure();
   const version = String(result.version);
   if (!result.public_id.startsWith(`${FOLDER}/${userId}/`)) throw new Error("That upload doesn't belong to you.");
@@ -95,9 +116,11 @@ export async function registerCloudinaryUpload(userId: string, result: Cloudinar
     throw new Error("Upload signature didn't verify.");
   }
   const [row] = await sql<{ id: string }[]>`
-    insert into images (uploader_id, storage, storage_key, version, format, width, height, bytes)
+    insert into images (uploader_id, storage, storage_key, version, format, width, height, bytes,
+                        source_repo, source_video, source_time)
     values (${userId}, 'cloudinary', ${result.public_id}, ${version}, ${result.format ?? null},
-            ${result.width ?? null}, ${result.height ?? null}, ${result.bytes ?? null})
+            ${result.width ?? null}, ${result.height ?? null}, ${result.bytes ?? null},
+            ${source?.repo ?? null}, ${source?.video ?? null}, ${source?.time ?? null})
     returning id`;
   return row.id;
 }
@@ -107,7 +130,7 @@ export async function registerCloudinaryUpload(userId: string, result: Cloudinar
 const LOCAL_DIR = path.join(process.cwd(), ".uploads");
 const LOCAL_TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 
-export async function saveLocalImage(userId: string, file: File): Promise<string> {
+export async function saveLocalImage(userId: string, file: File, source: VideoSource | null = null): Promise<string> {
   if (storageMode() !== "local") throw new Error("Local storage is only for development.");
   const ext = LOCAL_TYPES[file.type];
   if (!ext) throw new Error("Use a JPG, PNG or WebP image.");
@@ -116,8 +139,9 @@ export async function saveLocalImage(userId: string, file: File): Promise<string
   const name = `${crypto.randomUUID()}.${ext}`;
   await fs.writeFile(path.join(LOCAL_DIR, name), Buffer.from(await file.arrayBuffer()));
   const [row] = await sql<{ id: string }[]>`
-    insert into images (uploader_id, storage, storage_key, format, bytes)
-    values (${userId}, 'local', ${name}, ${ext}, ${file.size}) returning id`;
+    insert into images (uploader_id, storage, storage_key, format, bytes, source_repo, source_video, source_time)
+    values (${userId}, 'local', ${name}, ${ext}, ${file.size},
+            ${source?.repo ?? null}, ${source?.video ?? null}, ${source?.time ?? null}) returning id`;
   return row.id;
 }
 

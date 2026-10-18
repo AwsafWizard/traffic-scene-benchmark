@@ -8,6 +8,7 @@ import { Notice, PageHeader } from "../../ui/components";
 import SubmitButton from "../../ui/SubmitButton";
 import { buttonDanger, buttonSecondary, card, hint, input, label, select } from "../../ui/styles";
 import ActionForm from "../ActionForm";
+import SettingsTabs from "../SettingsTabs";
 import { ListRemoteModels, NewConnectionForm } from "./ConnectionTools";
 
 const FAMILIES: { key: Model["family"]; title: string }[] = [
@@ -27,6 +28,7 @@ export default async function ModelsPage() {
 
   return (
     <div className="space-y-8">
+      <SettingsTabs />
       <PageHeader
         title="Models"
         sub={`${models.length} models · ${models.filter((m) => m.funded).length} funded · ${ready} callable by API · $${totalSpend.toFixed(2)} spent through the app`}

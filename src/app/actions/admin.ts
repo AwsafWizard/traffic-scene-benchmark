@@ -30,6 +30,8 @@ import {
   saveTag,
   saveTagGroup,
 } from "@/server/taxonomy";
+import { listRepoVideos, parseRepo } from "@/server/hf";
+import { addVideos, deleteVideo, listVideos, setFolderActive, setVideoActive } from "@/server/videos";
 import {
   changeAdminPassword,
   createAnnotator,
@@ -101,6 +103,65 @@ export async function changePasswordAction(_prev: AdminState, form: FormData): P
     if (text(form, "next") !== text(form, "confirm")) return { error: "The new passwords don't match." };
     const error = await changeAdminPassword(me.id, text(form, "current"), text(form, "next"));
     return error ? { error } : { ok: "Password changed. Other sessions were signed out." };
+  });
+}
+
+// Videos -------------------------------------------------------------------------------------
+
+export type RepoListing =
+  | { ok: true; repo: string; files: { path: string; size: number | null; inLibrary: boolean }[] }
+  | { ok: false; error: string };
+
+/** Lists the videos in a Hugging Face dataset repo, marking the ones already in the library. */
+export async function findRepoVideosAction(input: string): Promise<RepoListing> {
+  try {
+    await admin();
+    const repo = parseRepo(String(input));
+    if (!repo) return { ok: false, error: "Enter the repo as owner/name, or paste its link." };
+    const [files, library] = await Promise.all([listRepoVideos(repo), listVideos()]);
+    if (files.length === 0) return { ok: false, error: "There are no videos in that repo." };
+    const known = new Set(library.filter((v) => v.repo === repo).map((v) => v.path));
+    return { ok: true, repo, files: files.map((f) => ({ ...f, inLibrary: known.has(f.path) })) };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Couldn't read the repo." };
+  }
+}
+
+/** Adds videos from a repo. The paths are checked against the repo itself. */
+export async function addVideosAction(input: string, paths: string[]): Promise<{ ok: true; added: number } | { ok: false; error: string }> {
+  try {
+    const me = await admin();
+    const repo = parseRepo(String(input));
+    if (!repo) return { ok: false, error: "That isn't a repo name." };
+    const wanted = new Set(Array.isArray(paths) ? paths.map(String) : []);
+    const files = (await listRepoVideos(repo)).filter((f) => wanted.has(f.path));
+    if (files.length === 0) return { ok: false, error: "No videos to add." };
+    const added = await addVideos(me.id, repo, files);
+    revalidatePath("/admin/videos");
+    return { ok: true, added };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Couldn't add the videos." };
+  }
+}
+
+export async function setVideoActiveAction(form: FormData): Promise<void> {
+  const me = await admin();
+  await setVideoActive(me.id, num(form, "id"), flag(form, "active"));
+  revalidatePath("/admin/videos");
+}
+
+export async function setFolderActiveAction(form: FormData): Promise<void> {
+  const me = await admin();
+  await setFolderActive(me.id, text(form, "repo"), text(form, "folder"), flag(form, "active"));
+  revalidatePath("/admin/videos");
+}
+
+export async function deleteVideoAction(_prev: AdminState, form: FormData): Promise<AdminState> {
+  return guarded(async () => {
+    const me = await admin();
+    await deleteVideo(me.id, num(form, "id"));
+    revalidatePath("/admin/videos");
+    return { ok: "Removed." };
   });
 }
 
