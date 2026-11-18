@@ -4,7 +4,7 @@
 
 A web app for writing and cross-checking the DhakaDrive-VQA benchmark questions. Annotators upload traffic scenes and write multiple-choice questions on the topics they're given; other annotators then check them without seeing the setter's answer first. The admin runs everything: accounts, the taxonomy, sprints, the model check, statistics and export.
 
-It runs as one Next.js app on Vercel, with Postgres on Supabase and images on Cloudinary. Live at `dhakavqa.triips.org`.
+It runs as one Next.js app on Vercel, with Postgres on Supabase and images on Cloudinary. Live at `dhakadrivevqa.triips.org`.
 
 ---
 
@@ -137,7 +137,7 @@ The build runs the database migrations first (`npm run build`), so every deploy 
 
 ### 5. Domain
 
-In Vercel, **Settings → Domains → Add** `dhakavqa.triips.org`. Vercel shows a CNAME record to create. **Add it in Cloudflare**, which hosts triips.org's DNS (a record added in cPanel has no effect), with the proxy set to *DNS only*.
+In Vercel, **Settings → Domains → Add** `dhakadrivevqa.triips.org`. Vercel shows a CNAME record to create. **Add it in Cloudflare**, which hosts triips.org's DNS (a record added in cPanel has no effect), with the proxy set to *DNS only*.
 
 ### 6. Backups
 
